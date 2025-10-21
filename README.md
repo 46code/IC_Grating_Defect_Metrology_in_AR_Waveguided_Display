@@ -1,2 +1,0 @@
-# IC_Grating_Defect_Metrology_in_AR_Waveguided_Display
-Industrial Project-Dispelix Oy
