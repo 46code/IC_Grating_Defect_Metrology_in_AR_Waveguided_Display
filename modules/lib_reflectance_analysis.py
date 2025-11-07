@@ -68,7 +68,7 @@ class ReflectanceAnalyzer:
             roi_mask (np.ndarray): Binary ROI mask
 
         Returns:
-            dict: ROI analysis results
+            dict: ROI analysis assets
         """
         print("📊 Extracting ROI reflectance spectrum...")
 
@@ -126,8 +126,8 @@ class ReflectanceAnalyzer:
         Compare ROI spectra between reference and sample
 
         Args:
-            reference_results (dict): Reference ROI analysis results
-            sample_results (dict): Sample ROI analysis results
+            reference_results (dict): Reference ROI analysis assets
+            sample_results (dict): Sample ROI analysis assets
 
         Returns:
             dict: Comparison analysis
@@ -181,7 +181,7 @@ class ReflectanceAnalyzer:
         Plot ROI reflectance spectrum
 
         Args:
-            roi_results (dict): ROI analysis results
+            roi_results (dict): ROI analysis assets
             title (str): Plot title
 
         Returns:
@@ -222,7 +222,7 @@ class ReflectanceAnalyzer:
         Plot comparison between reference and sample spectra
 
         Args:
-            comparison_results (dict): Comparison analysis results
+            comparison_results (dict): Comparison analysis assets
             title (str): Plot title
 
         Returns:
@@ -261,3 +261,4 @@ class ReflectanceAnalyzer:
                 verticalalignment='top', bbox=dict(boxstyle="round", facecolor='lightcoral', alpha=0.8))
 
         return fig
+
