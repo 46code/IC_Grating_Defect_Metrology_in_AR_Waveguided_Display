@@ -1,7 +1,9 @@
-numpy
-matplotlib
-pillow
-opencv-python
-scipy
-scikit-image
+numpy>=1.21.0
+matplotlib>=3.5.0
+opencv-python>=4.5.0
+scikit-image>=0.19.0
+scipy>=1.7.0
+scikit-learn>=1.0.0
+tifffile>=2021.7.2
+Pillow>=8.3.0
 
