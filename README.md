@@ -153,9 +153,9 @@ Meaning: 1.0 = sectors very similar (high uniformity). Lower values = more angul
 ## 6. Scatter Plots (After Running)
 Below are the plot references (will show once generated):
 
-![RMSE Scatter](assets/scatter_plots/RMSE_Overall_Scatter.png)
-![SAM Mean Scatter](assets/scatter_plots/SAM_Mean_Scatter.png)
-![Uniformity Score Scatter](assets/scatter_plots/Uniformity_Score_Scatter.png)
+![RMSE Scatter](assets/scatter_plots/CTQ1_RMSE_RMSE_Per_Pixel_P95_Scatter.png)
+![SAM Mean Scatter](assets/scatter_plots/CTQ2_SAM_SAM_Mean_Scatter.png)
+![Uniformity Score Scatter](assets/scatter_plots/CTQ3_Uniformity_Score_Scatter.png)
 ![Combined Scatter](assets/scatter_plots/Combined_Analysis_Scatter.png)
 
 Red X = metric fails threshold. Orange line = threshold. Blue dotted line = mean.
