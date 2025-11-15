@@ -29,7 +29,7 @@ class HyperspectralAnalyzer:
             roi_mask: ROI mask (binary)
 
         Returns:
-            dict: RMSE metrics (overall_rmse, rmse_per_pixel_mean, rmse_map)
+            dict: RMSE metrics (overall_rmse, rmse_per_pixel_mean, rmse_per_pixel_median, rmse_per_pixel_p95, rmse_map)
         """
         if reference_reflectance is None or sample_reflectance is None:
             return None
@@ -50,6 +50,8 @@ class HyperspectralAnalyzer:
         rmse_per_pixel = np.sqrt(np.mean((ref_roi - sample_roi)**2, axis=1))
         overall_rmse = np.sqrt(np.mean((ref_roi - sample_roi)**2))
         rmse_per_pixel_mean = np.mean(rmse_per_pixel)
+        rmse_per_pixel_median = np.median(rmse_per_pixel)
+        rmse_per_pixel_p95 = np.percentile(rmse_per_pixel, 95)
 
         # Create per-pixel RMSE map
         rmse_map = np.zeros(roi_mask.shape)
@@ -58,6 +60,8 @@ class HyperspectralAnalyzer:
         return {
             'overall_rmse': float(overall_rmse),
             'rmse_per_pixel_mean': float(rmse_per_pixel_mean),
+            'rmse_per_pixel_median': float(rmse_per_pixel_median),
+            'rmse_per_pixel_p95': float(rmse_per_pixel_p95),
             'rmse_map': rmse_map
         }
 
@@ -103,11 +107,13 @@ class HyperspectralAnalyzer:
         roi_sam_values = sam_map[roi_binary]
         sam_median = float(np.median(roi_sam_values))
         sam_mean = float(np.mean(roi_sam_values))
+        sam_p95 = float(np.percentile(roi_sam_values, 95))
 
         return {
             'sam_map': sam_map,
             'sam_median': sam_median,
-            'sam_mean': sam_mean
+            'sam_mean': sam_mean,
+            'sam_p95': sam_p95
         }
 
     def calculate_ring_metrics(self, metric_map, center, roi_mask, inner_frac=0.2, outer_frac=0.8):
@@ -261,4 +267,3 @@ class HyperspectralAnalyzer:
 
         print("✅ Hyperspectral analysis complete!")
         return results
-

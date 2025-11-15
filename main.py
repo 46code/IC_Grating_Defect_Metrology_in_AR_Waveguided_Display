@@ -278,9 +278,12 @@ def process_sample(sample_name):
     print(f"\n✅ Analysis Results for {sample_name}:")
     print(f"   RMSE Overall: {rmse_results['overall_rmse']:.6f}")
     print(f"   RMSE Per-Pixel Mean: {rmse_results['rmse_per_pixel_mean']:.6f}")
-    print(f"   SAM Mean: {sam_results['sam_mean']:.6f} rad ({np.degrees(sam_results['sam_mean']):.2f}°)")
-    print(f"   SAM Median: {sam_results['sam_median']:.6f} rad ({np.degrees(sam_results['sam_median']):.2f}°)")
-    print(f"   Ring Delta: {ring_results['delta_ring']:.6f} rad ({np.degrees(ring_results['delta_ring']):.2f}°)")
+    print(f"   RMSE Per-Pixel Median: {rmse_results['rmse_per_pixel_median']:.6f}")
+    print(f"   RMSE Per-Pixel P95: {rmse_results['rmse_per_pixel_p95']:.6f}")
+    print(f"   SAM Mean: {np.degrees(sam_results['sam_mean']):.2f}°")
+    print(f"   SAM Median: {np.degrees(sam_results['sam_median']):.2f}°")
+    print(f"   SAM P95: {np.degrees(sam_results['sam_p95']):.2f}°")
+    print(f"   Ring Delta: {np.degrees(ring_results['delta_ring']):.2f}°")
     print(f"   Uniformity Score: {uniformity_results['U']:.3f}")
 
     # =============================================================================
@@ -333,9 +336,12 @@ def process_sample(sample_name):
     summary_data = [
         ["RMSE Overall", f"{rmse_results['overall_rmse']:.6f}"],
         ["RMSE Per-Pixel Mean", f"{rmse_results['rmse_per_pixel_mean']:.6f}"],
-        ["SAM Mean", f"{sam_results['sam_mean']:.6f} rad ({np.degrees(sam_results['sam_mean']):.2f}°)"],
-        ["SAM Median", f"{sam_results['sam_median']:.6f} rad ({np.degrees(sam_results['sam_median']):.2f}°)"],
-        ["Ring Delta", f"{ring_results['delta_ring']:.6f} rad ({np.degrees(ring_results['delta_ring']):.2f}°)"],
+        ["RMSE Per-Pixel Median", f"{rmse_results['rmse_per_pixel_median']:.6f}"],
+        ["RMSE Per-Pixel P95", f"{rmse_results['rmse_per_pixel_p95']:.6f}"],
+        ["SAM Mean", f"{np.degrees(sam_results['sam_mean']):.2f}°"],
+        ["SAM Median", f"{np.degrees(sam_results['sam_median']):.2f}°"],
+        ["SAM P95", f"{np.degrees(sam_results['sam_p95']):.2f}°"],
+        ["Ring Delta", f"{np.degrees(ring_results['delta_ring']):.2f}°"],
         ["Ring Inner Mean", f"{ring_results['inner_mean']:.6f} rad"],
         ["Ring Outer Mean", f"{ring_results['outer_mean']:.6f} rad"],
         ["Uniformity Score", f"{uniformity_results['U']:.3f}"],

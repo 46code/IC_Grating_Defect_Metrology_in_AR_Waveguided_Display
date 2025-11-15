@@ -2,7 +2,20 @@
   "data_paths": {
     "base_path": "/Users/khangtran/Documents/Programming/Schools/COSI/Defect_Search/IDP Group C",
     "samples": [
-      "Defect1"
+        "Defect1",
+        "Defect2",
+        "Defect3",
+        "Defect4",
+        "Defect5",
+        "Defect6",
+        "Defect7",
+        "Defect8",
+        "Defect9",
+        "Defect10",
+        "Defect11",
+        "Defect12",
+        "Defect13",
+        "Defect14"
     ],
     "results_dir_prefix": "results/complete_analysis_"
   },
@@ -35,7 +48,35 @@
   },
   "quality_thresholds": {
     "rmse_overall_max": 0.08,
-    "sam_mean_max": 0.06,
-    "uniformity_score_min": 0.7
+    "rmse_per_pixel_mean_max": 0.06,
+    "rmse_per_pixel_median_max": 0.09,
+    "rmse_per_pixel_p95_max": 0.1,
+    "sam_mean_max": 3.0,
+    "sam_median_max": 3.0,
+    "sam_p95_max": 5.2,
+    "uniformity_score_min": 0.6
+  },
+  "plotting_configuration": {
+    "selected_metrics": {
+      "CTQ1_RMSE": "RMSE_Per_Pixel_P95",
+      "CTQ2_SAM": "SAM_Mean",
+      "CTQ3_Uniformity": "Uniformity_Score"
+    },
+    "available_options": {
+      "CTQ1_RMSE": [
+        "RMSE_Overall",
+        "RMSE_Per_Pixel_Mean",
+        "RMSE_Per_Pixel_Median",
+        "RMSE_Per_Pixel_P95"
+      ],
+      "CTQ2_SAM": [
+        "SAM_Mean",
+        "SAM_Median",
+        "SAM_P95"
+      ],
+      "CTQ3_Uniformity": [
+        "Uniformity_Score"
+      ]
+    }
   }
 }
