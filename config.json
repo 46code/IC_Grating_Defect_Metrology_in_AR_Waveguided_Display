@@ -2,14 +2,14 @@
   "data_paths": {
     "base_path": "./Gage R&R",
 
-    "reference_path": "${base_path}/KhangT2/Reference",
-    "reference_white_path": "${base_path}/KhangT2/White",
-    "reference_dark_path": "${base_path}/KhangT2/Dark",
+    "reference_path": "IDP Group C/reference",
+    "reference_white_path": "IDP Group C/white",
+    "reference_dark_path": "IDP Group C/dark",
 
-    "results_dir_prefix": "results/AnirbanT1",
-    "sample_white_path": "${base_path}/AnirbanT1/whiteref",
-    "sample_dark_path": "${base_path}/AnirbanT1/darkref",
-    "sample_path": "${base_path}/AnirbanT1",
+    "results_dir_prefix": "results/AnirbanT2",
+    "sample_white_path": "${base_path}/AnirbanT2/whiteref",
+    "sample_dark_path": "${base_path}/AnirbanT2/darkref",
+    "sample_path": "${base_path}/AnirbanT2",
     "samples": [
         "sample01",
         "sample02",
@@ -26,14 +26,14 @@
     ]
   },
   "analysis_parameters": {
-    "percentile_threshold": 3.9,
+    "percentile_threshold": 4.5,
     "wavelength_range": {
       "min": 450,
       "max": 800,
       "step": 10
     },
     "circle_crop_region": [
-      0.05,
+      0.075,
       0.5,
       0.0,
       0.5
