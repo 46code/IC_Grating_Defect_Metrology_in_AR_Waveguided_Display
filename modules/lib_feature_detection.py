@@ -309,11 +309,11 @@ class FeatureDetector:
 
             if score >= self.circle_params['circle_threshold'] and score > best_score:
                 # Adjust coordinates back to original image
-                global_x = x + offset[0] + 5 # small horizontal adjustment
+                global_x = x + offset[0] - 4 # small horizontal adjustment
                 global_y = y + offset[1] # small vertical adjustment
                 best_circle = {
                     'center': (global_x, global_y),
-                    'radius': radius - 5,
+                    'radius': radius - 4,
                     'score': score
                 }
                 best_score = score
