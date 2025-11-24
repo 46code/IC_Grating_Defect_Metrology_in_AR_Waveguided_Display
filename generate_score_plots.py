@@ -30,14 +30,54 @@ def load_config():
         print("   Please create config.json with required parameters.")
         return None
 
+def extract_dataset_identifier(config):
+    """Extract dataset identifier from sample_path (e.g., 'KhangT1' from '${base_path}/KhangT1')"""
+    try:
+        sample_path = config['data_paths']['sample_path']
+        
+        # Handle variable substitution
+        if '${base_path}' in sample_path:
+            base_path = config['data_paths']['base_path']
+            full_path = sample_path.replace('${base_path}', base_path)
+        else:
+            full_path = sample_path
+            
+        # Extract the last directory name
+        # Remove trailing slashes and split by path separator
+        clean_path = full_path.rstrip('/')
+        path_parts = clean_path.split('/')
+        
+        # Get the last non-empty part
+        for part in reversed(path_parts):
+            if part.strip():
+                return part
+                
+        return None
+    except (KeyError, IndexError):
+        return None
+
 def collect_analysis_data(samples, results_dir_prefix):
     """Collect analysis data from processed samples"""
     batch_data = []
 
     print(f"📊 Collecting data from {len(samples)} samples...")
+    
+    # Auto-detect naming convention (Defect vs Sample) - case insensitive and typo tolerant
+    sample_type = "Sample"
+    for sample in samples:
+        sample_lower = sample.lower()
+        # Check for defect patterns first
+        if any(pattern in sample_lower for pattern in ['defect', 'def']):
+            sample_type = "Defect"
+            break
+        # Check for sample patterns (including typos like 'smple')
+        elif any(pattern in sample_lower for pattern in ['sample', 'smple', 'samp']):
+            sample_type = "Sample"
+
+    print(f"   Detected naming convention: {sample_type}")
 
     for sample_name in samples:
-        results_dir = results_dir_prefix + sample_name
+        results_dir = os.path.join(results_dir_prefix, f"analysis_{sample_name}")
         summary_file = os.path.join(results_dir, 'analysis_summary.csv')
 
         if os.path.exists(summary_file):
@@ -61,9 +101,14 @@ def collect_analysis_data(samples, results_dir_prefix):
                 # Extract other metrics
                 uniformity_score = float(summary_df[summary_df['Metric'] == 'Uniformity Score']['Value'].iloc[0])
 
+                # Robust sample number extraction - handles all variations and typos
+                import re
+                sample_num = extract_sample_number(sample_name, sample_type)
+
                 batch_data.append({
                     'Sample': sample_name,
-                    'Sample_Num': int(sample_name.replace('Defect', '')),
+                    'Sample_Num': sample_num,
+                    'Sample_Type': sample_type,
                     'RMSE_Overall': rmse_overall,
                     'RMSE_Per_Pixel_Mean': rmse_per_pixel_mean,
                     'RMSE_Per_Pixel_Median': rmse_per_pixel_median,
@@ -82,6 +127,51 @@ def collect_analysis_data(samples, results_dir_prefix):
             print(f"⚠️  Analysis summary not found for {sample_name}: {summary_file}")
 
     return batch_data
+
+def extract_sample_number(sample_name, sample_type):
+    """
+    Extract sample number from sample name, handling all variations and typos
+    Examples: sample01, Sample01, smple14, defect1, Defect10, etc.
+    """
+    import re
+
+    sample_lower = sample_name.lower()
+
+    if sample_type == "Sample":
+        # Handle various sample patterns (including typos)
+        sample_patterns = [
+            r'sample(\d+)',     # sample01, sample1
+            r'smple(\d+)',      # smple14 (typo)
+            r'samp(\d+)',       # samp01 (abbreviation)
+            r'sam(\d+)',        # sam01 (short form)
+            r's(\d+)',          # s01 (very short)
+        ]
+
+        for pattern in sample_patterns:
+            match = re.search(pattern, sample_lower)
+            if match:
+                return int(match.group(1))
+
+    else:  # Defect type
+        # Handle various defect patterns
+        defect_patterns = [
+            r'defect(\d+)',     # defect1, defect10
+            r'def(\d+)',        # def1 (abbreviation)
+            r'd(\d+)',          # d1 (very short)
+        ]
+
+        for pattern in defect_patterns:
+            match = re.search(pattern, sample_lower)
+            if match:
+                return int(match.group(1))
+
+    # Fallback: extract any number from the string
+    numbers = re.findall(r'\d+', sample_name)
+    if numbers:
+        return int(numbers[0])
+
+    # Ultimate fallback: use hash of the name for consistent ordering
+    return abs(hash(sample_name)) % 10000
 
 def generate_scatter_plots(batch_data, output_dir, config):
     """Generate 3 scatter plots: RMSE, SAM_Mean, and Uniformity Score for all defects"""
@@ -240,7 +330,7 @@ def generate_scatter_plots(batch_data, output_dir, config):
 
         # Add sample labels (smaller for combined plot)
         for x, y, sample in zip(sample_nums, values, df_batch['Sample']):
-            ax.annotate(sample.replace('Defect', 'D'), (x, y), textcoords="offset points",
+            ax.annotate(sample.replace('Sample', 'S'), (x, y), textcoords="offset points",
                        xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
 
         # Statistical lines
@@ -355,259 +445,9 @@ def get_available_metrics():
         'Uniformity_Score': 'Uniformity Score'
     }
 
-def select_metrics_for_plotting(available_metrics, config_thresholds):
-    """Select which metrics to plot based on available thresholds in config"""
-    selected_configs = []
-
-    # Default colors for different metric types
-    colors = {
-        'RMSE': ['#e74c3c', '#c0392b', '#a93226', '#922b21'],
-        'SAM': ['#3498db', '#2980b9', '#1f618d', '#154360'],
-        'Other': ['#2ecc71', '#27ae60', '#229954', '#1e8449']
-    }
-
-    rmse_color_idx = 0
-    sam_color_idx = 0
-    other_color_idx = 0
-
-    for metric_key, metric_name in available_metrics.items():
-        # Check if we have a threshold for this metric in config
-        threshold_key = None
-        if metric_key == 'RMSE_Overall':
-            threshold_key = 'rmse_overall_max'
-        elif metric_key == 'RMSE_Per_Pixel_Mean':
-            threshold_key = 'rmse_per_pixel_mean_max'
-        elif metric_key == 'RMSE_Per_Pixel_Median':
-            threshold_key = 'rmse_per_pixel_median_max'
-        elif metric_key == 'RMSE_Per_Pixel_P95':
-            threshold_key = 'rmse_per_pixel_p95_max'
-        elif metric_key == 'SAM_Mean':
-            threshold_key = 'sam_mean_max'
-        elif metric_key == 'SAM_Median':
-            threshold_key = 'sam_median_max'
-        elif metric_key == 'SAM_P95':
-            threshold_key = 'sam_p95_max'
-        elif metric_key == 'Uniformity_Score':
-            threshold_key = 'uniformity_score_min'
-
-        if threshold_key and threshold_key in config_thresholds:
-            # Determine color and threshold type
-            if 'RMSE' in metric_key:
-                color = colors['RMSE'][rmse_color_idx % len(colors['RMSE'])]
-                rmse_color_idx += 1
-                threshold_type = 'below'
-            elif 'SAM' in metric_key:
-                color = colors['SAM'][sam_color_idx % len(colors['SAM'])]
-                sam_color_idx += 1
-                threshold_type = 'below'
-            else:
-                color = colors['Other'][other_color_idx % len(colors['Other'])]
-                other_color_idx += 1
-                threshold_type = 'above' if 'Uniformity' in metric_key else 'below'
-
-            selected_configs.append({
-                'metric': metric_key,
-                'title': f'{metric_name} Analysis Across All Defects',
-                'ylabel': metric_name,
-                'color': color,
-                'filename': f'{metric_key}_Scatter',
-                'threshold': config_thresholds[threshold_key],
-                'threshold_type': threshold_type
-            })
-
-    return selected_configs
-
-def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_configs):
-    """Generate scatter plots for selected metrics with flexible configuration"""
-    if len(batch_data) < 1:
-        print("⚠️  No data available to generate scatter plots")
-        return
-
-    print(f"\n📊 GENERATING SCATTER PLOTS FOR {len(batch_data)} DEFECTS")
-    print("="*80)
-
-    # Convert to DataFrame
-    df_batch = pd.DataFrame(batch_data)
-
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Generate individual scatter plots for each selected metric
-    for plot_config in selected_configs:
-        plt.figure(figsize=(12, 8))
-
-        metric = plot_config['metric']
-        values = df_batch[metric].values
-        sample_nums = df_batch['Sample_Num'].values
-        threshold = plot_config['threshold']
-        threshold_type = plot_config['threshold_type']
-
-        # Calculate statistics
-        min_val = values.min()
-        max_val = values.max()
-        mean_val = values.mean()
-        std_val = values.std()
-
-        # Determine which samples pass/fail the threshold
-        if threshold_type == 'below':
-            pass_threshold = values < threshold
-            threshold_label = f'Threshold < {threshold}'
-        else:  # above
-            pass_threshold = values > threshold
-            threshold_label = f'Threshold > {threshold}'
-
-        # Scatter plot
-        plt.scatter(sample_nums, values, s=200, c=plot_config['color'], alpha=0.7,
-                   edgecolors='black', linewidth=2, zorder=3)
-
-        # Add X markers for samples that don't pass threshold
-        failed_samples = ~pass_threshold
-        if np.any(failed_samples):
-            failed_x = sample_nums[failed_samples]
-            failed_y = values[failed_samples]
-            plt.scatter(failed_x, failed_y, s=300, marker='x', c='red', linewidth=4, zorder=4,
-                       label=f'Failed ({np.sum(failed_samples)} samples)')
-
-        # Add sample labels
-        for x, y, sample in zip(sample_nums, values, df_batch['Sample']):
-            plt.annotate(sample, (x, y), textcoords="offset points",
-                        xytext=(0, 12), ha='center', fontsize=10, fontweight='bold')
-
-        # Add statistical lines
-        plt.axhline(y=min_val, color='red', linestyle='--', linewidth=2,
-                   alpha=0.7, label=f'Min: {min_val:.4f}')
-        plt.axhline(y=max_val, color='green', linestyle='--', linewidth=2,
-                   alpha=0.7, label=f'Max: {max_val:.4f}')
-        plt.axhline(y=mean_val, color='blue', linestyle=':', linewidth=2,
-                   alpha=0.6, label=f'Mean: {mean_val:.4f}')
-
-        # Add threshold line
-        plt.axhline(y=threshold, color='orange', linestyle='-', linewidth=3,
-                   alpha=0.8, label=threshold_label)
-
-        # Formatting
-        plt.xlabel('Defect Number', fontsize=12, fontweight='bold')
-        plt.ylabel(plot_config['ylabel'], fontsize=12, fontweight='bold')
-        plt.title(plot_config['title'], fontsize=14, fontweight='bold', pad=20)
-        plt.xlim(0, max(sample_nums) + 1)
-        plt.grid(True, alpha=0.3, linestyle='--')
-        plt.legend(loc='best', fontsize=10, framealpha=0.9)
-
-        # Add statistics box with pass/fail info
-        pass_count = np.sum(pass_threshold)
-        fail_count = np.sum(failed_samples)
-        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\n✅ Passed: {pass_count}\n❌ Failed: {fail_count}'
-        plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
-                fontsize=10, va='top', ha='left', fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black'))
-
-        # Save plot
-        plt.tight_layout()
-        png_path = os.path.join(output_dir, f"{plot_config['filename']}.png")
-        plt.savefig(png_path, dpi=300, bbox_inches='tight')
-        plt.close()
-
-        print(f"✅ Generated: {plot_config['filename']} (✅ {pass_count} passed, ❌ {fail_count} failed)")
-
-    # Generate combined plot if we have 3 or fewer metrics
-    if len(selected_configs) <= 3:
-        fig, axes = plt.subplots(1, len(selected_configs), figsize=(6*len(selected_configs), 6))
-        if len(selected_configs) == 1:
-            axes = [axes]
-        fig.suptitle('Hyperspectral Analysis Summary - All Defects', fontsize=16, fontweight='bold')
-
-        for i, plot_config in enumerate(selected_configs):
-            ax = axes[i]
-            metric = plot_config['metric']
-            values = df_batch[metric].values
-            sample_nums = df_batch['Sample_Num'].values
-            threshold = plot_config['threshold']
-            threshold_type = plot_config['threshold_type']
-
-            # Determine which samples pass/fail the threshold
-            if threshold_type == 'below':
-                pass_threshold = values < threshold
-            else:  # above
-                pass_threshold = values > threshold
-
-            # Scatter plot
-            ax.scatter(sample_nums, values, s=120, c=plot_config['color'], alpha=0.7,
-                      edgecolors='black', linewidth=1.5, zorder=3)
-
-            # Add X markers for samples that don't pass threshold
-            failed_samples = ~pass_threshold
-            if np.any(failed_samples):
-                failed_x = sample_nums[failed_samples]
-                failed_y = values[failed_samples]
-                ax.scatter(failed_x, failed_y, s=150, marker='x', c='red', linewidth=3, zorder=4)
-
-            # Add sample labels (smaller for combined plot)
-            for x, y, sample in zip(sample_nums, values, df_batch['Sample']):
-                ax.annotate(sample.replace('Defect', 'D'), (x, y), textcoords="offset points",
-                           xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
-
-            # Statistical lines
-            mean_val = values.mean()
-            ax.axhline(y=mean_val, color='blue', linestyle=':', linewidth=1.5,
-                      alpha=0.6, label=f'Mean: {mean_val:.4f}')
-
-            # Add threshold line
-            ax.axhline(y=threshold, color='orange', linestyle='-', linewidth=2,
-                      alpha=0.8, label=f'Threshold: {threshold}')
-
-            # Formatting
-            ax.set_xlabel('Defect Number', fontsize=10, fontweight='bold')
-            ax.set_ylabel(plot_config['ylabel'], fontsize=10, fontweight='bold')
-            ax.set_title(plot_config['title'].replace(' Analysis Across All Defects', ''),
-                        fontsize=11, fontweight='bold')
-            ax.set_xlim(0, max(sample_nums) + 1)
-            ax.grid(True, alpha=0.3, linestyle='--')
-            ax.legend(loc='best', fontsize=8)
-
-        plt.tight_layout()
-        combined_png = os.path.join(output_dir, "Combined_Analysis_Scatter.png")
-        plt.savefig(combined_png, dpi=300, bbox_inches='tight')
-        plt.close()
-
-        print(f"✅ Generated: Combined_Analysis_Scatter")
-
-    # Save batch analysis summary
-    batch_summary_df = pd.DataFrame(batch_data)
-    batch_summary_path = os.path.join(output_dir, "batch_analysis_summary.csv")
-    batch_summary_df.to_csv(batch_summary_path, index=False)
-
-    # Fix SAM units display in threshold summary
-    print(f"\n{'='*80}")
-    print("🎯 THRESHOLD ANALYSIS SUMMARY")
-    print(f"{'='*80}")
-
-    # Print threshold criteria with correct units
-    print(f"📊 THRESHOLD CRITERIA:")
-    for plot_config in selected_configs:
-        threshold_op = "<" if plot_config['threshold_type'] == 'below' else ">"
-        unit_str = ""
-        if "degrees" in plot_config['ylabel'].lower():
-            unit_str = "°"
-        print(f"   • {plot_config['ylabel']} {threshold_op} {plot_config['threshold']}{unit_str}")
-
-    print(f"\n📊 SCATTER PLOT SUMMARY:")
-    print(f"   Generated {len(selected_configs)} individual plots + 1 combined plot saved to: {output_dir}")
-    for plot_config in selected_configs:
-        print(f"   - {plot_config['filename']}: {plot_config['ylabel']} analysis")
-    if len(selected_configs) <= 3:
-        print(f"   - Combined_Analysis_Scatter: All metrics in one view")
-    print(f"   Batch data summary saved to: {batch_summary_path}")
-
-    return output_dir
-
 def get_selected_metrics_from_config(config):
     """Get selected metrics from config with their display properties and thresholds"""
     selected_configs = []
-
-    # Check if plotting_configuration exists in config
-    if 'plotting_configuration' not in config:
-        print("⚠️  No plotting_configuration found in config. Using default metrics.")
-        return select_metrics_for_plotting(get_available_metrics(), config['quality_thresholds'])
 
     plotting_config = config['plotting_configuration']
     selected_metrics = plotting_config.get('selected_metrics', {})
@@ -679,6 +519,198 @@ def get_threshold_key_for_metric(metric_key):
     }
     return mapping.get(metric_key)
 
+def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_configs):
+    """Generate scatter plots for selected metrics with flexible configuration"""
+    if len(batch_data) < 1:
+        print("⚠️  No data available to generate scatter plots")
+        return
+
+    # Auto-detect sample type from data
+    sample_type = batch_data[0]['Sample_Type']
+    sample_type_plural = f"{sample_type}s"
+    sample_short = sample_type[0]  # 'S' for Sample, 'D' for Defect
+
+    # Extract dataset identifier from config
+    dataset_identifier = extract_dataset_identifier(config)
+    dataset_suffix = f" - {dataset_identifier}" if dataset_identifier else ""
+
+    print(f"\n📊 GENERATING SCATTER PLOTS FOR {len(batch_data)} {sample_type_plural.upper()}")
+    if dataset_identifier:
+        print(f"   Dataset: {dataset_identifier}")
+    print("="*80)
+
+    # Convert to DataFrame
+    df_batch = pd.DataFrame(batch_data)
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate individual scatter plots for each selected metric
+    for plot_config in selected_configs:
+        plt.figure(figsize=(12, 8))
+
+        metric = plot_config['metric']
+        values = df_batch[metric].values
+        sample_nums = df_batch['Sample_Num'].values
+        threshold = plot_config['threshold']
+        threshold_type = plot_config['threshold_type']
+
+        # Calculate statistics
+        min_val = values.min()
+        max_val = values.max()
+        mean_val = values.mean()
+        std_val = values.std()
+
+        # Determine which samples pass/fail the threshold
+        if threshold_type == 'below':
+            pass_threshold = values <= threshold
+            threshold_label = f'Threshold <= {threshold}'
+        else:  # above
+            pass_threshold = values >= threshold
+            threshold_label = f'Threshold >= {threshold}'
+
+        # Scatter plot
+        plt.scatter(sample_nums, values, s=200, c=plot_config['color'], alpha=0.7,
+                   edgecolors='black', linewidth=2, zorder=3)
+
+        # Add X markers for samples that don't pass threshold
+        failed_samples = ~pass_threshold
+        if np.any(failed_samples):
+            failed_x = sample_nums[failed_samples]
+            failed_y = values[failed_samples]
+            plt.scatter(failed_x, failed_y, s=300, marker='x', c='red', linewidth=4, zorder=4,
+                       label=f'Failed ({np.sum(failed_samples)} {sample_type_plural.lower()})')
+
+        # Add sample labels
+        for x, y, sample in zip(sample_nums, values, df_batch['Sample']):
+            plt.annotate(sample, (x, y), textcoords="offset points",
+                        xytext=(0, 12), ha='center', fontsize=10, fontweight='bold')
+
+        # Add statistical lines
+        plt.axhline(y=min_val, color='red', linestyle='--', linewidth=2,
+                   alpha=0.7, label=f'Min: {min_val:.4f}')
+        plt.axhline(y=max_val, color='green', linestyle='--', linewidth=2,
+                   alpha=0.7, label=f'Max: {max_val:.4f}')
+        plt.axhline(y=mean_val, color='blue', linestyle=':', linewidth=2,
+                   alpha=0.6, label=f'Mean: {mean_val:.4f}')
+
+        # Add threshold line
+        plt.axhline(y=threshold, color='orange', linestyle='-', linewidth=3,
+                   alpha=0.8, label=threshold_label)
+
+        # Dynamic formatting based on sample type
+        plt.xlabel(f'{sample_type} Number', fontsize=12, fontweight='bold')
+        plt.ylabel(plot_config['ylabel'], fontsize=12, fontweight='bold')
+
+        # Update title to use dynamic sample type and dataset identifier
+        dynamic_title = plot_config['title'].replace('Defects', sample_type_plural).replace('Defect', sample_type)
+        dynamic_title += dataset_suffix
+        plt.title(dynamic_title, fontsize=14, fontweight='bold', pad=20)
+
+        plt.xlim(0, max(sample_nums) + 1)
+        plt.grid(True, alpha=0.3, linestyle='--')
+        plt.legend(loc='best', fontsize=10, framealpha=0.9)
+
+        # Add statistics box with pass/fail info
+        pass_count = np.sum(pass_threshold)
+        fail_count = np.sum(failed_samples)
+        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\n✅ Passed: {pass_count}\n❌ Failed: {fail_count}'
+        plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
+                fontsize=10, va='top', ha='left', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black'))
+
+        # Save plot
+        plt.tight_layout()
+        png_path = os.path.join(output_dir, f"{plot_config['filename']}.png")
+        plt.savefig(png_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"✅ Generated: {plot_config['filename']} (✅ {pass_count} passed, ❌ {fail_count} failed)")
+
+    # Generate combined plot if we have 3 or fewer metrics
+    if len(selected_configs) <= 3:
+        fig, axes = plt.subplots(1, len(selected_configs), figsize=(6*len(selected_configs), 6))
+        if len(selected_configs) == 1:
+            axes = [axes]
+
+        # Dynamic title for combined plot with dataset identifier
+        combined_title = f'Hyperspectral Analysis Summary - All {sample_type_plural}{dataset_suffix}'
+        fig.suptitle(combined_title, fontsize=16, fontweight='bold')
+
+        for i, plot_config in enumerate(selected_configs):
+            ax = axes[i]
+            metric = plot_config['metric']
+            values = df_batch[metric].values
+            sample_nums = df_batch['Sample_Num'].values
+            threshold = plot_config['threshold']
+            threshold_type = plot_config['threshold_type']
+
+            # Determine which samples pass/fail the threshold
+            if threshold_type == 'below':
+                pass_threshold = values <= threshold
+            else:  # above
+                pass_threshold = values >= threshold
+
+            # Scatter plot
+            ax.scatter(sample_nums, values, s=120, c=plot_config['color'], alpha=0.7,
+                      edgecolors='black', linewidth=1.5, zorder=3)
+
+            # Add X markers for samples that don't pass threshold
+            failed_samples = ~pass_threshold
+            if np.any(failed_samples):
+                failed_x = sample_nums[failed_samples]
+                failed_y = values[failed_samples]
+                ax.scatter(failed_x, failed_y, s=150, marker='x', c='red', linewidth=3, zorder=4)
+
+            # Add sample labels (shorter for combined plot)
+            for x, y, sample in zip(sample_nums, values, df_batch['Sample']):
+                ax.annotate(sample.replace(sample_type, sample_short), (x, y), textcoords="offset points",
+                           xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
+
+            # Statistical lines
+            mean_val = values.mean()
+            ax.axhline(y=mean_val, color='blue', linestyle=':', linewidth=1.5,
+                      alpha=0.6, label=f'Mean: {mean_val:.4f}')
+
+            # Add threshold line
+            ax.axhline(y=threshold, color='orange', linestyle='-', linewidth=2,
+                      alpha=0.8, label=f'Threshold: {threshold}')
+
+            # Dynamic formatting
+            ax.set_xlabel(f'{sample_type} Number', fontsize=10, fontweight='bold')
+            ax.set_ylabel(plot_config['ylabel'], fontsize=10, fontweight='bold')
+
+            # Update subplot title
+            subplot_title = plot_config['title'].replace(f' Analysis Across All Defects', '').replace('Defects', sample_type_plural).replace('Defect', sample_type)
+            ax.set_title(subplot_title, fontsize=11, fontweight='bold')
+
+            ax.set_xlim(0, max(sample_nums) + 1)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.legend(loc='best', fontsize=8)
+
+        plt.tight_layout()
+        combined_png = os.path.join(output_dir, "Combined_Analysis_Scatter.png")
+        plt.savefig(combined_png, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"✅ Generated: Combined_Analysis_Scatter")
+
+    # Save batch analysis summary
+    batch_summary_df = pd.DataFrame(batch_data)
+    batch_summary_path = os.path.join(output_dir, "batch_analysis_summary.csv")
+    batch_summary_df.to_csv(batch_summary_path, index=False)
+
+    print(f"\n📊 SCATTER PLOT SUMMARY:")
+    print(f"   Generated {len(selected_configs)} individual plots + 1 combined plot saved to: {output_dir}")
+    for plot_config in selected_configs:
+        dynamic_description = plot_config['ylabel'] + f" analysis across {sample_type_plural.lower()}"
+        print(f"   - {plot_config['filename']}: {dynamic_description}")
+    if len(selected_configs) <= 3:
+        print(f"   - Combined_Analysis_Scatter: All metrics in one view")
+    print(f"   Batch data summary saved to: {batch_summary_path}")
+
+    return output_dir
+
 def validate_plotting_configuration(config):
     """Validate that the plotting configuration is valid"""
     if 'plotting_configuration' not in config:
@@ -687,107 +719,252 @@ def validate_plotting_configuration(config):
     plotting_config = config['plotting_configuration']
     selected_metrics = plotting_config.get('selected_metrics', {})
     available_options = plotting_config.get('available_options', {})
+    quality_thresholds = config.get('quality_thresholds', {})
 
     errors = []
     warnings = []
 
-    # Check that selected metrics are in available options
-    for ctq_type, selected_metric in selected_metrics.items():
+    # Validate each selected metric
+    for ctq_type, metric_key in selected_metrics.items():
+        # Check if the CTQ type has available options
         if ctq_type not in available_options:
-            errors.append(f"CTQ type '{ctq_type}' not found in available_options")
+            warnings.append(f"No available options defined for {ctq_type}")
             continue
 
-        if selected_metric not in available_options[ctq_type]:
-            errors.append(f"Selected metric '{selected_metric}' not available for {ctq_type}")
-            errors.append(f"Available options: {available_options[ctq_type]}")
-            continue
+        # Check if the selected metric is in the available options
+        if metric_key not in available_options[ctq_type]:
+            errors.append(f"Selected metric '{metric_key}' for {ctq_type} is not in available options: {available_options[ctq_type]}")
 
-        # Check if threshold exists for selected metric
-        threshold_key = get_threshold_key_for_metric(selected_metric)
-        if threshold_key and threshold_key not in config.get('quality_thresholds', {}):
-            warnings.append(f"No threshold found for '{selected_metric}' (expected: {threshold_key})")
+        # Check if there's a corresponding threshold
+        threshold_key = get_threshold_key_for_metric(metric_key)
+        if not threshold_key or threshold_key not in quality_thresholds:
+            errors.append(f"No threshold found for '{metric_key}' (expected: {threshold_key})")
 
     if errors:
-        return False, "Configuration errors: " + "; ".join(errors)
+        return False, f"Configuration errors: {'; '.join(errors)}"
     elif warnings:
-        return True, "Configuration warnings: " + "; ".join(warnings)
+        return True, f"Configuration warnings: {'; '.join(warnings)}"
     else:
         return True, "Configuration is valid"
 
+def evaluate_ctq_criteria(batch_data, config):
+    """
+    Evaluate CTQ (Critical to Quality) pass/fail criteria for all samples
+
+    Args:
+        batch_data: List of dictionaries containing sample analysis results
+        config: Configuration dictionary containing thresholds
+
+    Returns:
+        dict: CTQ evaluation results with pass/fail status for each sample
+    """
+    quality_thresholds = config['quality_thresholds']
+    selected_metrics = config['plotting_configuration']['selected_metrics']
+
+    ctq_results = {}
+
+    for sample_data in batch_data:
+        sample_name = sample_data['Sample']
+
+        # Extract the selected metrics for CTQ evaluation
+        ctq_evaluations = {}
+
+        for ctq_type, metric_key in selected_metrics.items():
+            if metric_key not in sample_data:
+                continue
+
+            threshold_key = get_threshold_key_for_metric(metric_key)
+            if not threshold_key or threshold_key not in quality_thresholds:
+                continue
+
+            value = sample_data[metric_key]
+            threshold = quality_thresholds[threshold_key]
+
+            # Determine pass/fail based on metric type
+            if 'uniformity' in threshold_key.lower():
+                # Uniformity: pass if above threshold
+                passes = value >= threshold
+                comparison = f">= {threshold}"
+            else:
+                # RMSE/SAM: pass if below threshold
+                passes = value <= threshold
+                comparison = f"<= {threshold}"
+
+            ctq_evaluations[ctq_type] = {
+                'metric_key': metric_key,
+                'value': value,
+                'threshold': threshold,
+                'comparison': comparison,
+                'pass': passes
+            }
+
+        # Overall pass if all CTQs pass
+        overall_pass = all(eval_data['pass'] for eval_data in ctq_evaluations.values())
+
+        ctq_results[sample_name] = {
+            'evaluations': ctq_evaluations,
+            'overall_pass': overall_pass
+        }
+    return ctq_results
+
+def generate_final_summary_table(batch_data, ctq_results, config, output_dir):
+    """Generate and display final summary table with sample names as rows"""
+    selected_metrics = config['plotting_configuration']['selected_metrics']
+
+    print("🎯 FINAL SUMMARY TABLE")
+    print(f"{'='*120}")
+
+    # Create table data structure with samples as rows
+    sample_names = [data['Sample'] for data in batch_data]
+
+    # Create column headers: metrics + CTQ pass/fail + total pass
+    metric_columns = []
+    for ctq_type, metric_key in selected_metrics.items():
+        metric_columns.append(metric_key.replace('_', ' '))
+
+    ctq_columns = [f"{ctq_type}" for ctq_type in selected_metrics.keys()]
+
+    columns = ['Sample'] + metric_columns + ctq_columns + ['Total_Pass']
+
+    # Create rows - one per sample
+    rows = []
+
+    for sample_data in batch_data:
+        sample_name = sample_data['Sample']
+        row = [sample_name]
+
+        # Add metric values
+        for ctq_type, metric_key in selected_metrics.items():
+            if metric_key in sample_data:
+                value = sample_data[metric_key]
+                if 'SAM' in metric_key:
+                    # Format SAM values with degrees symbol
+                    row.append(f"{value:.2f}°")
+                elif 'Uniformity' in metric_key:
+                    # Format uniformity as 3 decimal places
+                    row.append(f"{value:.3f}")
+                else:
+                    # Format RMSE values with 4 decimal places
+                    row.append(f"{value:.4f}")
+            else:
+                row.append("N/A")
+
+        # Add CTQ pass/fail status
+        for ctq_type in selected_metrics.keys():
+            if sample_name in ctq_results and ctq_type in ctq_results[sample_name]['evaluations']:
+                passes = ctq_results[sample_name]['evaluations'][ctq_type]['pass']
+                row.append("✅" if passes else "❌")
+            else:
+                row.append("N/A")
+
+        # Add total pass status
+        if sample_name in ctq_results:
+            overall_pass = ctq_results[sample_name]['overall_pass']
+            row.append("Pass" if overall_pass else "Fail")
+        else:
+            row.append("N/A")
+
+        rows.append(row)
+
+    # Create and display DataFrame
+    summary_df = pd.DataFrame(rows, columns=columns)
+
+    print(summary_df.to_string(index=False))
+
+    # Save the summary table to CSV
+    summary_table_path = os.path.join(output_dir, "final_summary_table.csv")
+    summary_df.to_csv(summary_table_path, index=False)
+
+    # Calculate and display statistics
+    total_samples = len(sample_names)
+    passed_samples = sum(1 for sample_name in sample_names
+                        if sample_name in ctq_results and ctq_results[sample_name]['overall_pass'])
+    failed_samples = total_samples - passed_samples
+
+    print(f"\n{'='*120}")
+    print("📊 SUMMARY STATISTICS:")
+    print(f"   Total Samples: {total_samples}")
+    print(f"   ✅ Passed All CTQs: {passed_samples} ({passed_samples/total_samples*100:.1f}%)")
+    print(f"   ❌ Failed At Least One CTQ: {failed_samples} ({failed_samples/total_samples*100:.1f}%)")
+
+    # Show thresholds used
+    print(f"\n📋 CTQ THRESHOLDS USED:")
+    quality_thresholds = config['quality_thresholds']
+    for ctq_type, metric_key in selected_metrics.items():
+        threshold_key = get_threshold_key_for_metric(metric_key)
+        if threshold_key and threshold_key in quality_thresholds:
+            threshold = quality_thresholds[threshold_key]
+            comparison = ">=" if 'uniformity' in threshold_key.lower() else "<="
+            unit = "°" if 'SAM' in metric_key else ""
+            print(f"   {ctq_type} ({metric_key}): {comparison} {threshold}{unit}")
+
+    print(f"\n💾 Final summary table saved to: {summary_table_path}")
+    print(f"{'='*120}")
+
+    return summary_df
+
 def main():
-    """Main function to generate scatter plots based on config.json"""
-    print("="*80)
-    print("🔬 Hyperspectral Analysis Score Plot Generator")
+    """Main function to generate scatter plots and final summary"""
+    print("📊 Hyperspectral Analysis Score Plot Generator")
     print("="*80)
 
     # Load configuration
     config = load_config()
-    if config is None:
+    if not config:
         return
 
-    # Validate plotting configuration
+    # Validate configuration
     is_valid, message = validate_plotting_configuration(config)
     if not is_valid:
-        print(f"❌ {message}")
+        print(f"❌ Configuration validation failed: {message}")
         return
-    elif "warnings" in message.lower():
+    elif message != "Configuration is valid":
         print(f"⚠️  {message}")
 
-    # Extract configuration parameters
+    # Extract parameters from config
     samples = config['data_paths']['samples']
     results_dir_prefix = config['data_paths']['results_dir_prefix']
 
-    print(f"📋 Configuration:")
-    print(f"   Samples to analyze: {len(samples)} - {samples}")
-    print(f"   Results directory prefix: {results_dir_prefix}")
+    # Extract dataset identifier for output directory
+    dataset_identifier = extract_dataset_identifier(config)
 
-    # Display selected metrics from config
-    if 'plotting_configuration' in config:
-        plotting_config = config['plotting_configuration']
-        selected_metrics = plotting_config.get('selected_metrics', {})
-        print(f"   Selected metrics from config:")
-        for ctq_type, metric_key in selected_metrics.items():
-            print(f"     • {ctq_type}: {metric_key}")
+    if dataset_identifier:
+        output_dir = os.path.join(results_dir_prefix, "scatter_plots")
+        print(f"📁 Dataset identified: {dataset_identifier}")
+    else:
+        output_dir = os.path.join(results_dir_prefix, "scatter_plots")
+        print(f"📁 No dataset identifier found, using default output directory")
 
-    # Get selected metrics based on config
-    selected_configs = get_selected_metrics_from_config(config)
+    print(f"📁 Output directory: {output_dir}")
 
-    if not selected_configs:
-        print("❌ No valid metrics found for plotting. Please check your configuration.")
-        return
-
-    print(f"   Plotting {len(selected_configs)} metrics:")
-    for config_item in selected_configs:
-        threshold_op = "<" if config_item['threshold_type'] == 'below' else ">"
-        unit_str = "°" if "degrees" in config_item['ylabel'].lower() else ""
-        print(f"     • {config_item['ylabel']} {threshold_op} {config_item['threshold']}{unit_str}")
-
-    # Collect analysis data
+    # Collect analysis data from processed samples
     batch_data = collect_analysis_data(samples, results_dir_prefix)
 
     if not batch_data:
-        print("❌ No analysis data found. Please run main.py first to generate analysis results.")
+        print("❌ No analysis data found. Please run the main analysis first.")
         return
 
-    # Generate scatter plots with config-driven metric selection
-    output_dir = "assets/scatter_plots"
-    generate_flexible_scatter_plots(batch_data, output_dir, config, selected_configs)
+    # Get selected metrics from config
+    selected_configs = get_selected_metrics_from_config(config)
 
-    print(f"\n{'='*80}")
-    print(f"✅ Scatter plot generation complete!")
-    print(f"   All plots saved to: {output_dir}")
-    print(f"{'='*80}")
+    if not selected_configs:
+        print("❌ No valid metrics selected for plotting.")
+        return
 
-    # Display how to change metric selections
-    if 'plotting_configuration' in config:
-        print(f"\n💡 To change which metrics are plotted:")
-        print(f"   Edit the 'selected_metrics' section in config.json")
-        available_options = config['plotting_configuration'].get('available_options', {})
-        for ctq_type, options in available_options.items():
-            current_selection = config['plotting_configuration']['selected_metrics'].get(ctq_type, 'None')
-            print(f"   {ctq_type} (current: {current_selection}): {', '.join(options)}")
-    print(f"{'='*80}")
+    print(f"📊 Selected {len(selected_configs)} metrics for plotting:")
+    for plot_config in selected_configs:
+        print(f"   - {plot_config['ctq_type']}: {plot_config['ylabel']}")
+
+    # Generate scatter plots
+    output_path = generate_flexible_scatter_plots(batch_data, output_dir, config, selected_configs)
+
+    # Evaluate CTQ criteria for all samples
+    ctq_results = evaluate_ctq_criteria(batch_data, config)
+
+    # Generate and display final summary table
+    summary_df = generate_final_summary_table(batch_data, ctq_results, config, output_dir)
+
+    print(f"\n✅ Analysis complete! All outputs saved to: {output_path}")
 
 if __name__ == "__main__":
     main()
-
