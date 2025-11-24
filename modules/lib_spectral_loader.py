@@ -5,39 +5,82 @@ Handles loading and management of hyperspectral data cubes
 """
 
 import numpy as np
-import os
 from pathlib import Path
 import tifffile
 
 class SpectralDataLoader:
     """Library for loading and managing hyperspectral data cubes"""
 
-    def __init__(self, data_path):
+    def __init__(self, data_paths):
         """
         Initialize the spectral data loader
 
         Args:
-            data_path (str): Path to the directory containing spectral data
+            data_paths (dict): Dictionary containing paths for different datasets:
+                - sample_white_path: Path to white reference data (for samples)
+                - sample_dark_path: Path to Dark reference data (for samples)
+                - reference_path: Path to reference data
+                - reference_white_path: Path to white reference data (for reference)
+                - reference_dark_path: Path to Dark reference data (for reference)
+                - sample_path: Base path for sample data
         """
-        self.data_path = Path(data_path)
+        # Process path variable substitution
+        processed_paths = self._process_path_variables(data_paths)
+
+        self.reference_path = Path(processed_paths['reference_path'])
+        self.reference_white_path = Path(processed_paths['reference_white_path'])
+        self.reference_dark_path = Path(processed_paths['reference_dark_path'])
+
+        self.sample_white_path = Path(processed_paths['sample_white_path'])
+        self.sample_dark_path = Path(processed_paths['sample_dark_path'])
+        self.sample_path = Path(processed_paths['sample_path'])
         self.wavelengths = list(range(450, 951, 10))  # 450-950nm in 10nm steps
 
-    def load_cube(self, dataset_name):
+    def _process_path_variables(self, data_paths):
+        """Process variable substitution in paths (e.g., ${base_path})"""
+        processed = {}
+        base_path = data_paths.get('base_path', '')
+
+        for key, value in data_paths.items():
+            if isinstance(value, str) and '${base_path}' in value:
+                processed[key] = value.replace('${base_path}', base_path)
+            else:
+                processed[key] = value
+
+        return processed
+
+    def load_cube(self, dataset_name, sample_name=None):
         """
         Load a complete spectral cube for a given dataset
 
         Args:
-            dataset_name (str): Name of dataset ('reference', 'white', 'Darkreference', etc.)
+            dataset_name (str): Type of dataset ('reference', 'white', 'Dark', 'sample')
+            sample_name (str): Name of sample (only used for 'sample' dataset_name)
 
         Returns:
             np.ndarray: Spectral cube with shape (height, width, num_bands)
         """
-        dataset_path = self.data_path / dataset_name
+        # Determine the correct path based on dataset type
+        if dataset_name == 'reference':
+            dataset_path = self.reference_path
+        elif dataset_name == 'white':
+            dataset_path = self.sample_white_path
+        elif dataset_name == 'dark':
+            dataset_path = self.sample_dark_path
+        elif dataset_name == 'sample':
+            if sample_name is None:
+                print(f"❌ Sample name required for sample dataset")
+                return None
+            dataset_path = self.sample_path / sample_name
+        else:
+            print(f"❌ Unknown dataset type: {dataset_name}")
+            return None
+
         if not dataset_path.exists():
             print(f"❌ Dataset path not found: {dataset_path}")
             return None
 
-        print(f"📁 Loading {dataset_name} spectral cube...")
+        print(f"📁 Loading {dataset_name} spectral cube from {dataset_path}...")
 
         # Get list of TIFF files
         tiff_files = sorted(list(dataset_path.glob("*.tif")))
@@ -82,6 +125,54 @@ class SpectralDataLoader:
 
         return cube[:, :, band_idx], band_idx
 
+    def load_reference_calibration_data(self):
+        """
+        Load white and Dark reference data specifically for reference reflectance computation
+
+        Returns:
+            tuple: (reference_white_cube, reference_dark_cube)
+        """
+        print(f"📁 Loading reference calibration data...")
+
+        # Load reference white data
+        if not self.reference_white_path.exists():
+            print(f"❌ Reference white path not found: {self.reference_white_path}")
+            return None, None
+
+        print(f"📁 Loading reference white cube from {self.reference_white_path}...")
+        tiff_files = sorted(list(self.reference_white_path.glob("*.tif")))
+        if not tiff_files:
+            print(f"❌ No TIFF files found in {self.reference_white_path}")
+            return None, None
+
+        # Load reference white cube
+        first_img = tifffile.imread(tiff_files[0])
+        height, width = first_img.shape
+        num_bands = len(tiff_files)
+
+        reference_white_cube = np.zeros((height, width, num_bands), dtype=first_img.dtype)
+        for i, tiff_file in enumerate(tiff_files):
+            reference_white_cube[:, :, i] = tifffile.imread(tiff_file)
+        print(f"✅ Loaded reference white: {reference_white_cube.shape}")
+
+        # Load reference Dark data
+        if not self.reference_dark_path.exists():
+            print(f"❌ Reference Dark path not found: {self.reference_dark_path}")
+            return None, None
+
+        print(f"📁 Loading reference Dark cube from {self.reference_dark_path}...")
+        tiff_files = sorted(list(self.reference_dark_path.glob("*.tif")))
+        if not tiff_files:
+            print(f"❌ No TIFF files found in {self.reference_dark_path}")
+            return None, None
+
+        reference_dark_cube = np.zeros((height, width, num_bands), dtype=first_img.dtype)
+        for i, tiff_file in enumerate(tiff_files):
+            reference_dark_cube[:, :, i] = tifffile.imread(tiff_file)
+        print(f"✅ Loaded reference Dark: {reference_dark_cube.shape}")
+
+        return reference_white_cube, reference_dark_cube
+
     def load_all_datasets(self, sample_name):
         """
         Load all required datasets for analysis
@@ -94,13 +185,24 @@ class SpectralDataLoader:
         """
         datasets = {}
 
-        # Load all required datasets
-        for name in ['reference', 'white', 'Darkreference', sample_name]:
-            cube = self.load_cube(name)
+        # Load all required datasets using new path structure
+        dataset_configs = [
+            ('reference', 'reference'),
+            ('white', 'white'),
+            ('dark', 'dark'),
+            ('sample', sample_name)
+        ]
+
+        for dataset_type, dataset_key in dataset_configs:
+            if dataset_type == 'sample':
+                cube = self.load_cube('sample', sample_name)
+            else:
+                cube = self.load_cube(dataset_type)
+
             if cube is None:
-                print(f"❌ Failed to load {name}")
+                print(f"❌ Failed to load {dataset_type}")
                 return None
-            datasets[name] = cube
+            datasets[dataset_key] = cube
 
         print(f"✅ All datasets loaded successfully")
         return datasets

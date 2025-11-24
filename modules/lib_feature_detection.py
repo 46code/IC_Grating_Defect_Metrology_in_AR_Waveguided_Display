@@ -27,16 +27,18 @@ class FeatureDetector:
             'circle_threshold': 0.3
         }
 
-    def detect_fiducials(self, image, num_fiducials=4):
+    def detect_fiducials(self, image, num_fiducials=4, percentile=3):
         """
         Detect fiducial markers using EXACT algorithm from fiducial_detection_pipeline.py
 
         Args:
             image (np.ndarray): Input grayscale image
             num_fiducials (int): Expected number of fiducials
+            percentile (float): Percentile threshold for binary thresholding
 
         Returns:
-            list: List of (x, y) coordinates of detected fiducials
+            tuple: (fiducials, binary_map) where fiducials is list of (x, y) coordinates
+                   and binary_map is the thresholded binary image used for detection
         """
         print(f"🎯 Detecting {num_fiducials} fiducials...")
 
@@ -45,8 +47,8 @@ class FeatureDetector:
         image_norm = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
         blurred = cv2.GaussianBlur(image_norm, (3, 3), 1)
 
-        # Percentile 3% thresholding (EXACT match)
-        binary = cv2.threshold(blurred, np.percentile(blurred, 3), 255, cv2.THRESH_BINARY_INV)[1]
+        # Percentile thresholding
+        binary = cv2.threshold(blurred, np.percentile(blurred, percentile), 255, cv2.THRESH_BINARY_INV)[1]
 
         # Find and filter candidates using exact original method
         candidates = self._find_cross_candidates(binary, image.shape)
@@ -54,7 +56,7 @@ class FeatureDetector:
 
         if not candidates:
             print(f"   ❌ No candidates found")
-            return []
+            return [], binary
 
         # Select best 4 fiducials using exact original method
         selected = self._select_best_fiducials(candidates, image.shape)
@@ -64,7 +66,7 @@ class FeatureDetector:
         else:
             print(f"   ❌ No fiducials selected")
 
-        return selected
+        return selected, binary
 
     def _find_cross_candidates(self, binary_image, image_shape):
         """EXACT copy from original fiducial_detection_pipeline.py"""
@@ -307,11 +309,11 @@ class FeatureDetector:
 
             if score >= self.circle_params['circle_threshold'] and score > best_score:
                 # Adjust coordinates back to original image
-                global_x = x + offset[0]
-                global_y = y + offset[1] + 5 # small vertical adjustment
+                global_x = x + offset[0] + 5 # small horizontal adjustment
+                global_y = y + offset[1] # small vertical adjustment
                 best_circle = {
                     'center': (global_x, global_y),
-                    'radius': radius + 1,
+                    'radius': radius - 5,
                     'score': score
                 }
                 best_score = score

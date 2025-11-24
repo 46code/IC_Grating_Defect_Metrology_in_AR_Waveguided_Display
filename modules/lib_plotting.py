@@ -26,9 +26,15 @@ class HyperspectralPlotter:
         plt.rcParams['savefig.dpi'] = config['plotting_settings']['save_dpi']
 
     def plot_fiducials(self, ref_band, sample_band, ref_fiducials, sample_fiducials,
-                      sample_name, wavelength, results_dir):
-        """Plot fiducial detection assets"""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+                      sample_name, wavelength, results_dir, ref_binary=None, sample_binary=None):
+        """Plot fiducial detection assets including binary maps"""
+        # Create subplot layout based on whether binary maps are provided
+        if ref_binary is not None or sample_binary is not None:
+            fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+            ax1, ax2, ax3, ax4 = axes.flatten()
+        else:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+            ax3 = ax4 = None
 
         # Reference with fiducials
         ax1.imshow(ref_band, cmap='gray')
@@ -46,28 +52,87 @@ class HyperspectralPlotter:
         ax2.set_title(f'{sample_name} Fiducials at {wavelength}nm', fontweight='bold')
         ax2.axis('off')
 
+        # Add binary maps if provided and axes exist
+        if ax3 is not None and ax4 is not None:
+            # Reference binary map
+            if ref_binary is not None:
+                ax3.imshow(ref_binary, cmap='gray')
+                for i, (x, y) in enumerate(ref_fiducials):
+                    ax3.plot(x, y, 'co', markersize=8)
+                    ax3.text(x+10, y-10, f'R{i+1}', color='cyan', fontsize=10, fontweight='bold')
+                ax3.set_title(f'Reference Binary Map at {wavelength}nm', fontweight='bold')
+            else:
+                ax3.text(0.5, 0.5, 'No Reference Binary Map', ha='center', va='center',
+                        transform=ax3.transAxes, fontsize=12)
+                ax3.set_title('Reference Binary Map (Not Available)', fontweight='bold')
+            ax3.axis('off')
+
+            # Sample binary map
+            if sample_binary is not None:
+                ax4.imshow(sample_binary, cmap='gray')
+                for i, (x, y) in enumerate(sample_fiducials):
+                    ax4.plot(x, y, 'mo', markersize=8)
+                    ax4.text(x+10, y-10, f'S{i+1}', color='magenta', fontsize=10, fontweight='bold')
+                ax4.set_title(f'{sample_name} Binary Map at {wavelength}nm', fontweight='bold')
+            else:
+                ax4.text(0.5, 0.5, 'No Sample Binary Map', ha='center', va='center',
+                        transform=ax4.transAxes, fontsize=12)
+                ax4.set_title(f'{sample_name} Binary Map (Not Available)', fontweight='bold')
+            ax4.axis('off')
+
         plt.tight_layout()
         plt.savefig(f'{results_dir}/01_fiducial_detection.png', dpi=300, bbox_inches='tight')
         plt.close()
 
     def plot_circle_detection(self, ref_band, ref_fiducials, center, radius,
-                            wavelength, results_dir):
-        """Plot circle detection assets"""
+                            wavelength, results_dir, crop_region=None):
+        """Plot circle detection results showing only the cropped region"""
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
 
-        ax.imshow(ref_band, cmap='gray')
+        # Apply cropping if specified
+        if crop_region:
+            x_min, x_max, y_min, y_max = crop_region
+            height, width = ref_band.shape
+            x_start = int(x_min * width)
+            x_end = int(x_max * width)
+            y_start = int(y_min * height)
+            y_end = int(y_max * height)
+            
+            # Crop the image
+            cropped_image = ref_band[y_start:y_end, x_start:x_end]
+            
+            # Adjust coordinates to cropped image space
+            adjusted_center = (center[0] - x_start, center[1] - y_start)
+            
+            # Filter fiducials to only show those within the crop region
+            cropped_fiducials = []
+            for i, (x, y) in enumerate(ref_fiducials):
+                if x_start <= x <= x_end and y_start <= y <= y_end:
+                    cropped_fiducials.append((x - x_start, y - y_start, i))
+            
+            display_image = cropped_image
+            display_center = adjusted_center
+            display_fiducials = cropped_fiducials
+            title_suffix = f"(Cropped Region)"
+        else:
+            display_image = ref_band
+            display_center = center
+            display_fiducials = [(x, y, i) for i, (x, y) in enumerate(ref_fiducials)]
+            title_suffix = ""
 
-        # Draw fiducials
-        for i, (x, y) in enumerate(ref_fiducials):
+        ax.imshow(display_image, cmap='gray')
+
+        # Draw fiducials that are within the displayed region
+        for x, y, orig_idx in display_fiducials:
             ax.plot(x, y, 'bo', markersize=8)
-            ax.text(x+15, y-15, f'R{i+1}', color='blue', fontsize=10, fontweight='bold')
+            ax.text(x+15, y-15, f'R{orig_idx+1}', color='blue', fontsize=10, fontweight='bold')
 
         # Draw IC circle
-        circle_patch = plt.Circle(center, radius, fill=False, color='lime', linewidth=3)
+        circle_patch = plt.Circle(display_center, radius, fill=False, color='lime', linewidth=3)
         ax.add_patch(circle_patch)
-        ax.plot(center[0], center[1], '+', color='lime', markersize=15, markeredgewidth=3)
+        ax.plot(display_center[0], display_center[1], '+', color='lime', markersize=15, markeredgewidth=3)
 
-        ax.set_title(f'Reference: Fiducials + IC Circle at {wavelength}nm', fontweight='bold')
+        ax.set_title(f'IC Circle Detection at {wavelength}nm {title_suffix}', fontweight='bold')
         ax.axis('off')
 
         plt.tight_layout()
@@ -97,7 +162,7 @@ class HyperspectralPlotter:
 
         plt.suptitle('Homography Registration Results', fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(f'{results_dir}/03_registration.png', dpi=300, bbox_inches='tight')
+        plt.savefig(f'{results_dir}/03_homography.png', dpi=300, bbox_inches='tight')
         plt.close()
 
     def plot_reflectance(self, ref_band, registered_band, roi_mask,

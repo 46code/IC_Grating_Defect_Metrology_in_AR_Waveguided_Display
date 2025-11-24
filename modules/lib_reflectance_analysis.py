@@ -262,3 +262,38 @@ class ReflectanceAnalyzer:
 
         return fig
 
+    def create_projection(self, reflectance_cube, wavelengths, wl_range=(450, 800)):
+        """
+        Create a normalized projection from reflectance cube by averaging over wavelength range
+
+        Args:
+            reflectance_cube (np.ndarray): Reflectance cube (H x W x bands)
+            wavelengths (np.ndarray): Wavelength array corresponding to bands
+            wl_range (tuple): Wavelength range for projection (min, max)
+
+        Returns:
+            np.ndarray: Normalized projection image (H x W)
+        """
+        print(f"🎯 Creating projection from wavelength range {wl_range[0]}-{wl_range[1]}nm...")
+
+        # Create mask for wavelength range
+        mask = (wavelengths >= wl_range[0]) & (wavelengths <= wl_range[1])
+
+        if not np.any(mask):
+            print(f"❌ No wavelengths found in range {wl_range}")
+            return None
+
+        # Average over selected wavelengths
+        proj = np.mean(reflectance_cube[:, :, mask], axis=2)
+
+        # Normalize to 0-1 range
+        proj_norm = (proj - proj.min()) / (proj.max() - proj.min() + 1e-8)
+
+        num_bands_used = np.sum(mask)
+        wl_used = wavelengths[mask]
+
+        print(f"✅ Projection created using {num_bands_used} bands ({wl_used[0]:.0f}-{wl_used[-1]:.0f}nm)")
+        print(f"   Projection range: {proj.min():.4f} - {proj.max():.4f} (raw)")
+        print(f"   Normalized range: {proj_norm.min():.4f} - {proj_norm.max():.4f}")
+
+        return proj_norm
