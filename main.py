@@ -1,0 +1,432 @@
+"""
+Hyperspectral Analysis Pipeline
+Complete workflow for fiducial detection, circle detection, homography, and reflectance analysis
+
+Author: Khang Tran
+Date: October 2025
+"""
+
+# =============================================================================
+# IMPORTS AND SETUP
+# =============================================================================
+
+import numpy as np
+import pandas as pd
+import os
+import json
+
+# Import our custom libraries
+from modules import SpectralDataLoader, FeatureDetector, ImageRegistration, ReflectanceAnalyzer, HyperspectralAnalyzer, HyperspectralPlotter
+
+# =============================================================================
+# LOAD CONFIGURATION
+# =============================================================================
+
+print("🔬 Hyperspectral Defect Analysis Pipeline")
+print("=" * 80)
+
+# Load configuration from JSON file
+config_path = "config.json"
+try:
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    print(f"✅ Configuration loaded from: {config_path}")
+except FileNotFoundError:
+    print(f"❌ Configuration file not found: {config_path}")
+    print("   Please create config.json with required parameters.")
+    exit(1)
+
+# Initialize plotter (this handles matplotlib configuration)
+plotter = HyperspectralPlotter(config)
+
+# =============================================================================
+# EXTRACT CONFIGURATION PARAMETERS
+# =============================================================================
+
+# Data paths
+DATA_PATHS = config['data_paths']
+SAMPLES = config['data_paths']['samples']
+RESULTS_DIR_PREFIX = config['data_paths']['results_dir_prefix']
+
+# Analysis parameters
+PERCENTILE_THRESHOLD = config['analysis_parameters']['percentile_threshold']
+WAVELENGTH_RANGE = config['analysis_parameters']['wavelength_range']
+CIRCLE_CROP_REGION = tuple(config['analysis_parameters']['circle_crop_region'])
+NUM_SECTORS = config['analysis_parameters']['num_sectors']
+NUM_FIDUCIALS = config['analysis_parameters']['num_fiducials']
+
+# Visualization parameters
+GENERATE_PLOTS = config['visualization_parameters']['generate_plots']
+
+# Validate samples list
+if not SAMPLES or len(SAMPLES) == 0:
+    print("❌ Error: No samples specified in configuration")
+    print("   Please add sample names to the 'samples' array in config.json")
+    exit(1)
+
+print(f"📋 Configuration:")
+print(f"   Samples to process: {len(SAMPLES)} - {SAMPLES}")
+print(f"   Results directory prefix: {RESULTS_DIR_PREFIX}")
+print(f"   Uniformity sectors: {NUM_SECTORS}")
+print(f"   Generate plots: {'Yes' if GENERATE_PLOTS else 'No'}")
+
+def process_sample(sample_name):
+    """Process a single sample through the complete analysis pipeline"""
+    print(f"\n{'='*60}")
+    print(f"🔬 PROCESSING SAMPLE: {sample_name}")
+    print(f"{'='*60}")
+
+    # Create assets directory for this sample
+    RESULTS_DIR = os.path.join(RESULTS_DIR_PREFIX, f"analysis_{sample_name}")
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
+    # =============================================================================
+    # STEP 1: DATA LOADING AND REFLECTANCE COMPUTATION
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 1: DATA LOADING AND REFLECTANCE COMPUTATION {'='*20}")
+
+    loader = SpectralDataLoader(DATA_PATHS)
+    datasets = loader.load_all_datasets(sample_name)
+
+    if datasets is None:
+        print(f"❌ Failed to load datasets for {sample_name}. Skipping.")
+        return None
+
+    # Extract individual cubes for convenience
+    reference_cube = datasets['reference']
+    sample_cube = datasets[sample_name]
+    white_cube = datasets['white']
+    dark_cube = datasets['dark']
+
+    print(f"✅ Loaded cubes: Ref{reference_cube.shape}, Sample{sample_cube.shape}")
+
+    # Filter spectral cubes to WAVELENGTH_RANGE
+    print(f"🔧 Filtering spectral data to wavelength range: {WAVELENGTH_RANGE['min']}-{WAVELENGTH_RANGE['max']}nm")
+
+    # Get wavelength indices within the specified range
+    wavelengths = np.arange(450, 951, 10)  # Standard wavelength array for this dataset
+    valid_indices = np.where(
+        (wavelengths >= WAVELENGTH_RANGE['min']) &
+        (wavelengths <= WAVELENGTH_RANGE['max'])
+    )[0]
+
+    if len(valid_indices) == 0:
+        print(f"❌ Error: No wavelengths found in range {WAVELENGTH_RANGE['min']}-{WAVELENGTH_RANGE['max']}nm")
+        return None
+
+    # Crop all cubes to the valid wavelength range
+    reference_cube = reference_cube[:, :, valid_indices]
+    sample_cube = sample_cube[:, :, valid_indices]
+    white_cube = white_cube[:, :, valid_indices]
+    dark_cube = dark_cube[:, :, valid_indices]
+
+    # Update wavelength array
+    filtered_wavelengths = wavelengths[valid_indices]
+
+    print(f"✅ Filtered cubes: Ref{reference_cube.shape}, Sample{sample_cube.shape}")
+    print(f"   Wavelength bands: {len(filtered_wavelengths)} ({filtered_wavelengths[0]}nm - {filtered_wavelengths[-1]}nm)")
+
+    # Load reference-specific white and Dark data
+    print("   Loading reference calibration data...")
+    reference_white_cube, reference_dark_cube = loader.load_reference_calibration_data()
+
+    if reference_white_cube is None or reference_dark_cube is None:
+        print("❌ Failed to load reference calibration data. Skipping.")
+        return None
+
+    # Filter reference calibration data to same wavelength range
+    reference_white_cube = reference_white_cube[:, :, valid_indices]
+    reference_dark_cube = reference_dark_cube[:, :, valid_indices]
+
+    print(f"✅ Filtered reference calibration cubes: White{reference_white_cube.shape}, Dark{reference_dark_cube.shape}")
+
+    # Initialize reflectance analyzer
+    analyzer = ReflectanceAnalyzer()
+
+    # Compute reflectance for reference using its specific white/Dark data
+    print("   Computing reference reflectance using reference-specific calibration data...")
+    reference_reflectance = analyzer.compute_reflectance(reference_cube, reference_white_cube, reference_dark_cube)
+
+    # Compute reflectance for sample using sample white/Dark data
+    print("   Computing sample reflectance using sample calibration data...")
+    sample_reflectance = analyzer.compute_reflectance(sample_cube, white_cube, dark_cube)
+
+    # Create projections for detection
+    print("   Creating projections for feature detection...")
+
+    # Use the same wavelength range that was used for filtering
+    proj_wl_range = (WAVELENGTH_RANGE['min'], WAVELENGTH_RANGE['max'])
+
+    reference_projection = analyzer.create_projection(reference_reflectance, filtered_wavelengths, proj_wl_range)
+    sample_projection = analyzer.create_projection(sample_reflectance, filtered_wavelengths, proj_wl_range)
+
+    if reference_projection is None or sample_projection is None:
+        print("❌ Failed to create projections. Skipping.")
+        return None
+
+    print(f"✅ Projections created with range {proj_wl_range[0]}-{proj_wl_range[1]}nm")
+
+    # =============================================================================
+    # STEP 2: DETECT FIDUCIAL POINTS (using projections)
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 2: FIDUCIAL DETECTION (using projections) {'='*20}")
+
+    detector = FeatureDetector()
+
+    # Convert projections to uint8 for detection (they are normalized 0-1)
+    ref_projection_uint8 = (reference_projection * 255).astype(np.uint8)
+    sample_projection_uint8 = (sample_projection * 255).astype(np.uint8)
+
+    # Detect fiducials in reference and sample projections
+    reference_fiducials, ref_binary = detector.detect_fiducials(ref_projection_uint8, num_fiducials=NUM_FIDUCIALS,
+                                                               percentile=3)
+    sample_fiducials, sample_binary = detector.detect_fiducials(sample_projection_uint8, num_fiducials=NUM_FIDUCIALS,
+                                                              percentile=PERCENTILE_THRESHOLD)
+
+    print(f"✅ Fiducial Detection Results:")
+    print(f"   Reference fiducials: {len(reference_fiducials)} points")
+    print(f"   Sample fiducials: {len(sample_fiducials)} points")
+
+    # Visualize fiducial detection using plotter
+    if GENERATE_PLOTS:
+        plotter.plot_fiducials(ref_projection_uint8, sample_projection_uint8, reference_fiducials, sample_fiducials,
+                              sample_name, f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR,
+                              ref_binary=ref_binary, sample_binary=sample_binary)
+
+    # =============================================================================
+    # STEP 3: DETECT IC CIRCLE IN REFERENCE (using projection)
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 3: IC CIRCLE DETECTION (using projection) {'='*20}")
+
+    ic_circle = detector.detect_circle(ref_projection_uint8, crop_region=CIRCLE_CROP_REGION)
+
+    center = ic_circle['center']
+    radius = ic_circle['radius']
+
+    print(f"✅ IC Circle detected:")
+    print(f"   Center: ({center[0]:.1f}, {center[1]:.1f})")
+    print(f"   Radius: {radius:.1f} pixels")
+
+    # Visualize circle detection using plotter
+    if GENERATE_PLOTS:
+        plotter.plot_circle_detection(ref_projection_uint8, reference_fiducials, center, radius,
+                                     f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR, CIRCLE_CROP_REGION)
+
+    # =============================================================================
+    # STEP 4: COMPUTE HOMOGRAPHY AND REGISTER SAMPLE
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 4: IMAGE REGISTRATION {'='*20}")
+
+    registrator = ImageRegistration()
+
+    # Compute homography matrix
+    homography_matrix = registrator.compute_homography(sample_fiducials, reference_fiducials)
+
+    # Get registration quality
+    quality_metrics = registrator.get_registration_quality()
+    print(f"✅ Registration Quality: {quality_metrics['quality']}")
+    if 'reprojection_error' in quality_metrics:
+        print(f"   Reprojection error: {quality_metrics['reprojection_error']:.4f} pixels")
+
+    # Register the sample reflectance cube (not the raw cube)
+    print("   Registering sample reflectance cube...")
+    registered_sample_reflectance = registrator.register_cube(sample_reflectance, homography_matrix)
+
+    # Create registered projection for visualization
+    registered_sample_projection = analyzer.create_projection(registered_sample_reflectance, filtered_wavelengths, proj_wl_range)
+    registered_projection_uint8 = (registered_sample_projection * 255).astype(np.uint8)
+
+    # Visualize registration assets using plotter
+    if GENERATE_PLOTS:
+        plotter.plot_registration(ref_projection_uint8, registered_projection_uint8, reference_fiducials, RESULTS_DIR)
+
+    # =============================================================================
+    # STEP 5: CREATE IC ROI MASK FOR ANALYSIS
+    # =============================================================================
+    print(f"\n{'='*20} STEP 5: ROI MASK CREATION {'='*20}")
+
+    # Create ROI mask from IC circle
+    print("   Creating IC ROI mask...")
+    roi_mask = registrator.create_roi_mask(reference_projection.shape, ic_circle)
+    print(f"   ROI contains {np.sum(roi_mask):,} pixels")
+
+    # Visualize ROI and reflectance using plotter (using projection for display)
+    if GENERATE_PLOTS:
+        # For visualization, use the middle band from reflectance data
+        analysis_band_idx = len(filtered_wavelengths) // 2
+
+        plotter.plot_reflectance(ref_projection_uint8, registered_projection_uint8, roi_mask,
+                                reference_reflectance, registered_sample_reflectance, analysis_band_idx,
+                                sample_name, f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR)
+
+    # =============================================================================
+    # STEP 6: HYPERSPECTRAL ANALYSIS
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 6: HYPERSPECTRAL ANALYSIS {'='*20}")
+
+    # Initialize hyperspectral analyzer
+    hyperspectral_analyzer = HyperspectralAnalyzer()
+
+    # Perform complete analysis using registered sample reflectance
+    results = hyperspectral_analyzer.analyze_sample(
+        registered_sample_reflectance,
+        reference_reflectance,
+        center,
+        roi_mask,
+        num_sectors=NUM_SECTORS
+    )
+
+    if results is None:
+        print("❌ Analysis failed. Exiting.")
+        exit(1)
+
+    # Extract assets
+    rmse_results = results['rmse']
+    sam_results = results['sam']
+    ring_results = results['ring']
+    uniformity_results = results['uniformity']
+
+    print(f"\n✅ Analysis Results for {sample_name}:")
+    print(f"   RMSE Overall: {rmse_results['overall_rmse']:.6f}")
+    print(f"   RMSE Per-Pixel Mean: {rmse_results['rmse_per_pixel_mean']:.6f}")
+    print(f"   RMSE Per-Pixel Median: {rmse_results['rmse_per_pixel_median']:.6f}")
+    print(f"   RMSE Per-Pixel P95: {rmse_results['rmse_per_pixel_p95']:.6f}")
+    print(f"   SAM Mean: {np.degrees(sam_results['sam_mean']):.2f}°")
+    print(f"   SAM Median: {np.degrees(sam_results['sam_median']):.2f}°")
+    print(f"   SAM P95: {np.degrees(sam_results['sam_p95']):.2f}°")
+    print(f"   Ring Delta: {np.degrees(ring_results['delta_ring']):.2f}°")
+    print(f"   Uniformity Score: {uniformity_results['U']:.3f}")
+
+    # =============================================================================
+    # STEP 7: VISUALIZATION (RMSE & SAM Maps)
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 7: VISUALIZATION (RMSE & SAM Maps) {'='*20}")
+
+    # Visualize analysis maps using plotter and get crop parameters for uniformity plot
+    if GENERATE_PLOTS:
+        crop_params = plotter.plot_analysis_maps(rmse_results['rmse_map'], sam_results['sam_map'],
+                                                 roi_mask, center, rmse_results, ring_results,
+                                                 sample_name, RESULTS_DIR)
+    else:
+        # Need crop parameters for uniformity analysis even when not plotting
+        roi_coords = np.where(roi_mask)
+        roi_distances = np.sqrt((roi_coords[1] - center[0])**2 + (roi_coords[0] - center[1])**2)
+        max_radius = np.max(roi_distances)
+        padded_radius = int(max_radius * plotter.config['visualization_parameters']['padding_factor'])
+        x_min = max(0, int(center[0] - padded_radius))
+        y_min = max(0, int(center[1] - padded_radius))
+        crop_params = (x_min, y_min, max_radius)
+
+    # =============================================================================
+    # STEP 8: UNIFORMITY ANALYSIS VISUALIZATION
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 8: UNIFORMITY ANALYSIS VISUALIZATION {'='*20}")
+
+    print(f"   Uniformity Score: {uniformity_results['U']:.3f}")
+    print(f"   Ring Delta: {ring_results['delta_ring']:.4f} rad ({np.degrees(ring_results['delta_ring']):.2f}°)")
+
+    # Visualize uniformity analysis using plotter
+    if GENERATE_PLOTS:
+        plotter.plot_uniformity_analysis(sam_results['sam_map'], roi_mask, center,
+                                         uniformity_results, ring_results,
+                                         sample_name, RESULTS_DIR, crop_params)
+
+    print(f"   Uniformity analysis complete")
+
+    # =============================================================================
+    # STEP 9: FINAL SUMMARY
+    # =============================================================================
+
+    print(f"\n{'='*20} STEP 9: FINAL SUMMARY {'='*20}")
+
+    line = "=" * 80
+
+    # Create summary table
+    summary_data = [
+        ["RMSE Overall", f"{rmse_results['overall_rmse']:.6f}"],
+        ["RMSE Per-Pixel Mean", f"{rmse_results['rmse_per_pixel_mean']:.6f}"],
+        ["RMSE Per-Pixel Median", f"{rmse_results['rmse_per_pixel_median']:.6f}"],
+        ["RMSE Per-Pixel P95", f"{rmse_results['rmse_per_pixel_p95']:.6f}"],
+        ["SAM Mean", f"{np.degrees(sam_results['sam_mean']):.2f}°"],
+        ["SAM Median", f"{np.degrees(sam_results['sam_median']):.2f}°"],
+        ["SAM P95", f"{np.degrees(sam_results['sam_p95']):.2f}°"],
+        ["Ring Delta", f"{np.degrees(ring_results['delta_ring']):.2f}°"],
+        ["Ring Inner Mean", f"{ring_results['inner_mean']:.6f} rad"],
+        ["Ring Outer Mean", f"{ring_results['outer_mean']:.6f} rad"],
+        ["Uniformity Score", f"{uniformity_results['U']:.3f}"],
+        ["Number of Sectors", f"{len(uniformity_results['sector_meds'])}"],
+        ["ROI Pixels", f"{int(np.sum(roi_mask)):,}"]
+    ]
+
+    summary_df = pd.DataFrame(summary_data, columns=["Metric", "Value"])
+
+    # Display assets
+    print(f"\n{line}")
+    print("📊 HYPERSPECTRAL ANALYSIS SUMMARY")
+    print(f"{line}")
+    print(summary_df.to_string(index=False))
+
+    print(f"\n{line}")
+    print("📋 METRIC BREAKDOWN:")
+    print(f"   RMSE: Measures spectral accuracy between sample and reference")
+    print(f"   SAM: Spectral Angle Mapper - measures spectral similarity")
+    print(f"   Ring Delta: Difference between inner and outer ring regions")
+    print(f"   Uniformity: Sector-based uniformity score (0-1, higher is better)")
+    print(f"{line}")
+
+    # Save assets to CSV
+    summary_df.to_csv(f'{RESULTS_DIR}/analysis_summary.csv', index=False)
+
+    print(f"✅ Hyperspectral Analysis complete! Results saved to: {RESULTS_DIR}")
+    print(f"{line}")
+
+    return {
+        'sample_name': sample_name,
+        'results_dir': RESULTS_DIR
+    }
+
+# =============================================================================
+# MAIN PROCESSING LOOP
+# =============================================================================
+
+all_results = []
+failed_samples = []
+
+for sample_name in SAMPLES:
+    try:
+        result = process_sample(sample_name)
+        if result:
+            all_results.append(result)
+        else:
+            failed_samples.append(sample_name)
+    except Exception as e:
+        print(f"❌ Error processing {sample_name}: {str(e)}")
+        failed_samples.append(sample_name)
+
+# =============================================================================
+# FINAL SUMMARY FOR ALL SAMPLES
+# =============================================================================
+
+print(f"\n{'='*80}")
+print("🎯 BATCH PROCESSING SUMMARY")
+print(f"{'='*80}")
+print(f"✅ Successfully processed: {len(all_results)} samples")
+if all_results:
+    for result in all_results:
+        print(f"   - {result['sample_name']}: Results saved to {result['results_dir']}")
+
+if failed_samples:
+    print(f"❌ Failed to process: {len(failed_samples)} samples")
+    for sample in failed_samples:
+        print(f"   - {sample}")
+
+print(f"✅ Batch processing complete!")
+print(f"\nℹ️  To generate scatter plots, run: python3 generate_score_plots.py")
+print(f"{'='*80}")

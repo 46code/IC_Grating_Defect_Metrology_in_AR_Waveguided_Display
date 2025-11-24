@@ -1,0 +1,89 @@
+{
+  "data_paths": {
+    "base_path": "./Gage R&R",
+
+    "reference_path": "${base_path}/KhangT2/Reference",
+    "reference_white_path": "${base_path}/KhangT2/White",
+    "reference_dark_path": "${base_path}/KhangT2/Dark",
+
+    "results_dir_prefix": "results/AnirbanT1",
+    "sample_white_path": "${base_path}/AnirbanT1/whiteref",
+    "sample_dark_path": "${base_path}/AnirbanT1/darkref",
+    "sample_path": "${base_path}/AnirbanT1",
+    "samples": [
+        "sample01",
+        "sample02",
+        "sample04",
+        "sample06",
+        "sample10",
+        "sample12",
+        "sample13",
+        "sample14",
+        "sample15",
+        "sample17",
+        "sample20",
+        "sample22"
+    ]
+  },
+  "analysis_parameters": {
+    "percentile_threshold": 3.9,
+    "wavelength_range": {
+      "min": 450,
+      "max": 800,
+      "step": 10
+    },
+    "circle_crop_region": [
+      0.05,
+      0.5,
+      0.0,
+      0.5
+    ],
+    "num_sectors": 8,
+    "num_fiducials": 4
+  },
+  "visualization_parameters": {
+    "generate_plots": true,
+    "padding_factor": 1.4,
+    "inner_radius_fraction": 0.2,
+    "outer_radius_fraction": 0.8
+  },
+  "plotting_settings": {
+    "figure_dpi": 100,
+    "save_dpi": 300,
+    "style": "default"
+  },
+  "quality_thresholds": {
+    "rmse_per_pixel_p95_max": 0.07,
+    "sam_mean_max": 2.6,
+    "uniformity_score_min": 0.6,
+
+    "rmse_overall_max": 0.08,
+    "rmse_per_pixel_mean_max": 0.06,
+    "rmse_per_pixel_median_max": 0.09,
+    "sam_median_max": 3.0,
+    "sam_p95_max": 5.2
+  },
+  "plotting_configuration": {
+    "selected_metrics": {
+      "CTQ1_RMSE": "RMSE_Per_Pixel_P95",
+      "CTQ2_SAM": "SAM_Mean",
+      "CTQ3_Uniformity": "Uniformity_Score"
+    },
+    "available_options": {
+      "CTQ1_RMSE": [
+        "RMSE_Overall",
+        "RMSE_Per_Pixel_Mean",
+        "RMSE_Per_Pixel_Median",
+        "RMSE_Per_Pixel_P95"
+      ],
+      "CTQ2_SAM": [
+        "SAM_Mean",
+        "SAM_Median",
+        "SAM_P95"
+      ],
+      "CTQ3_Uniformity": [
+        "Uniformity_Score"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+IDP Group C
+.idea/*
+.DS_Store
+results
+modules/__pycache__/
+/__pycache__
+/assets
+Gage R&R
+/modules/__pycache__
