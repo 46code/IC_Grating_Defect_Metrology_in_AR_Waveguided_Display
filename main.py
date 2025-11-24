@@ -44,12 +44,12 @@ plotter = HyperspectralPlotter(config)
 # =============================================================================
 
 # Data paths
-BASE_PATH = config['data_paths']['base_path']
+DATA_PATHS = config['data_paths']
 SAMPLES = config['data_paths']['samples']
 RESULTS_DIR_PREFIX = config['data_paths']['results_dir_prefix']
 
 # Analysis parameters
-ANALYSIS_WAVELENGTH = config['analysis_parameters']['analysis_wavelength']
+PERCENTILE_THRESHOLD = config['analysis_parameters']['percentile_threshold']
 WAVELENGTH_RANGE = config['analysis_parameters']['wavelength_range']
 CIRCLE_CROP_REGION = tuple(config['analysis_parameters']['circle_crop_region'])
 NUM_SECTORS = config['analysis_parameters']['num_sectors']
@@ -57,12 +57,6 @@ NUM_FIDUCIALS = config['analysis_parameters']['num_fiducials']
 
 # Visualization parameters
 GENERATE_PLOTS = config['visualization_parameters']['generate_plots']
-
-# Validate wavelength is within acceptable range
-if not (WAVELENGTH_RANGE['min'] <= ANALYSIS_WAVELENGTH <= WAVELENGTH_RANGE['max']):
-    print(f"❌ Error: Analysis wavelength {ANALYSIS_WAVELENGTH}nm is outside valid range")
-    print(f"   Valid range: {WAVELENGTH_RANGE['min']}-{WAVELENGTH_RANGE['max']}nm")
-    exit(1)
 
 # Validate samples list
 if not SAMPLES or len(SAMPLES) == 0:
@@ -72,7 +66,6 @@ if not SAMPLES or len(SAMPLES) == 0:
 
 print(f"📋 Configuration:")
 print(f"   Samples to process: {len(SAMPLES)} - {SAMPLES}")
-print(f"   Analysis wavelength: {ANALYSIS_WAVELENGTH}nm (range: {WAVELENGTH_RANGE['min']}-{WAVELENGTH_RANGE['max']}nm)")
 print(f"   Results directory prefix: {RESULTS_DIR_PREFIX}")
 print(f"   Uniformity sectors: {NUM_SECTORS}")
 print(f"   Generate plots: {'Yes' if GENERATE_PLOTS else 'No'}")
@@ -84,16 +77,16 @@ def process_sample(sample_name):
     print(f"{'='*60}")
 
     # Create assets directory for this sample
-    RESULTS_DIR = RESULTS_DIR_PREFIX + sample_name
+    RESULTS_DIR = os.path.join(RESULTS_DIR_PREFIX, f"analysis_{sample_name}")
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     # =============================================================================
-    # STEP 1: DATA LOADING
+    # STEP 1: DATA LOADING AND REFLECTANCE COMPUTATION
     # =============================================================================
 
-    print(f"\n{'='*20} STEP 1: DATA LOADING {'='*20}")
+    print(f"\n{'='*20} STEP 1: DATA LOADING AND REFLECTANCE COMPUTATION {'='*20}")
 
-    loader = SpectralDataLoader(BASE_PATH)
+    loader = SpectralDataLoader(DATA_PATHS)
     datasets = loader.load_all_datasets(sample_name)
 
     if datasets is None:
@@ -104,7 +97,7 @@ def process_sample(sample_name):
     reference_cube = datasets['reference']
     sample_cube = datasets[sample_name]
     white_cube = datasets['white']
-    dark_cube = datasets['Darkreference']
+    dark_cube = datasets['dark']
 
     print(f"✅ Loaded cubes: Ref{reference_cube.shape}, Sample{sample_cube.shape}")
 
@@ -134,35 +127,63 @@ def process_sample(sample_name):
     print(f"✅ Filtered cubes: Ref{reference_cube.shape}, Sample{sample_cube.shape}")
     print(f"   Wavelength bands: {len(filtered_wavelengths)} ({filtered_wavelengths[0]}nm - {filtered_wavelengths[-1]}nm)")
 
-    # Get analysis wavelength band from filtered data
-    # Find the band index for the analysis wavelength in the filtered data
-    analysis_band_idx = None
-    for i, wl in enumerate(filtered_wavelengths):
-        if wl == ANALYSIS_WAVELENGTH:
-            analysis_band_idx = i
-            break
+    # Load reference-specific white and Dark data
+    print("   Loading reference calibration data...")
+    reference_white_cube, reference_dark_cube = loader.load_reference_calibration_data()
 
-    if analysis_band_idx is None:
-        print(f"❌ Error: Analysis wavelength {ANALYSIS_WAVELENGTH}nm not found in filtered range")
+    if reference_white_cube is None or reference_dark_cube is None:
+        print("❌ Failed to load reference calibration data. Skipping.")
         return None
 
-    ref_band = reference_cube[:, :, analysis_band_idx]
-    sample_band = sample_cube[:, :, analysis_band_idx]
-    band_idx = analysis_band_idx
+    # Filter reference calibration data to same wavelength range
+    reference_white_cube = reference_white_cube[:, :, valid_indices]
+    reference_dark_cube = reference_dark_cube[:, :, valid_indices]
 
-    print(f"   Using band {band_idx} for {ANALYSIS_WAVELENGTH}nm analysis")
+    print(f"✅ Filtered reference calibration cubes: White{reference_white_cube.shape}, Dark{reference_dark_cube.shape}")
+
+    # Initialize reflectance analyzer
+    analyzer = ReflectanceAnalyzer()
+
+    # Compute reflectance for reference using its specific white/Dark data
+    print("   Computing reference reflectance using reference-specific calibration data...")
+    reference_reflectance = analyzer.compute_reflectance(reference_cube, reference_white_cube, reference_dark_cube)
+
+    # Compute reflectance for sample using sample white/Dark data
+    print("   Computing sample reflectance using sample calibration data...")
+    sample_reflectance = analyzer.compute_reflectance(sample_cube, white_cube, dark_cube)
+
+    # Create projections for detection
+    print("   Creating projections for feature detection...")
+
+    # Use the same wavelength range that was used for filtering
+    proj_wl_range = (WAVELENGTH_RANGE['min'], WAVELENGTH_RANGE['max'])
+
+    reference_projection = analyzer.create_projection(reference_reflectance, filtered_wavelengths, proj_wl_range)
+    sample_projection = analyzer.create_projection(sample_reflectance, filtered_wavelengths, proj_wl_range)
+
+    if reference_projection is None or sample_projection is None:
+        print("❌ Failed to create projections. Skipping.")
+        return None
+
+    print(f"✅ Projections created with range {proj_wl_range[0]}-{proj_wl_range[1]}nm")
 
     # =============================================================================
-    # STEP 2: DETECT FIDUCIAL POINTS
+    # STEP 2: DETECT FIDUCIAL POINTS (using projections)
     # =============================================================================
 
-    print(f"\n{'='*20} STEP 2: FIDUCIAL DETECTION {'='*20}")
+    print(f"\n{'='*20} STEP 2: FIDUCIAL DETECTION (using projections) {'='*20}")
 
     detector = FeatureDetector()
 
-    # Detect fiducials in reference and sample images
-    reference_fiducials = detector.detect_fiducials(ref_band, num_fiducials=NUM_FIDUCIALS)
-    sample_fiducials = detector.detect_fiducials(sample_band, num_fiducials=NUM_FIDUCIALS)
+    # Convert projections to uint8 for detection (they are normalized 0-1)
+    ref_projection_uint8 = (reference_projection * 255).astype(np.uint8)
+    sample_projection_uint8 = (sample_projection * 255).astype(np.uint8)
+
+    # Detect fiducials in reference and sample projections
+    reference_fiducials, ref_binary = detector.detect_fiducials(ref_projection_uint8, num_fiducials=NUM_FIDUCIALS,
+                                                               percentile=3)
+    sample_fiducials, sample_binary = detector.detect_fiducials(sample_projection_uint8, num_fiducials=NUM_FIDUCIALS,
+                                                              percentile=PERCENTILE_THRESHOLD)
 
     print(f"✅ Fiducial Detection Results:")
     print(f"   Reference fiducials: {len(reference_fiducials)} points")
@@ -170,16 +191,17 @@ def process_sample(sample_name):
 
     # Visualize fiducial detection using plotter
     if GENERATE_PLOTS:
-        plotter.plot_fiducials(ref_band, sample_band, reference_fiducials, sample_fiducials,
-                              sample_name, ANALYSIS_WAVELENGTH, RESULTS_DIR)
+        plotter.plot_fiducials(ref_projection_uint8, sample_projection_uint8, reference_fiducials, sample_fiducials,
+                              sample_name, f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR,
+                              ref_binary=ref_binary, sample_binary=sample_binary)
 
     # =============================================================================
-    # STEP 3: DETECT IC CIRCLE IN REFERENCE
+    # STEP 3: DETECT IC CIRCLE IN REFERENCE (using projection)
     # =============================================================================
 
-    print(f"\n{'='*20} STEP 3: IC CIRCLE DETECTION {'='*20}")
+    print(f"\n{'='*20} STEP 3: IC CIRCLE DETECTION (using projection) {'='*20}")
 
-    ic_circle = detector.detect_circle(ref_band, crop_region=CIRCLE_CROP_REGION)
+    ic_circle = detector.detect_circle(ref_projection_uint8, crop_region=CIRCLE_CROP_REGION)
 
     center = ic_circle['center']
     radius = ic_circle['radius']
@@ -190,8 +212,8 @@ def process_sample(sample_name):
 
     # Visualize circle detection using plotter
     if GENERATE_PLOTS:
-        plotter.plot_circle_detection(ref_band, reference_fiducials, center, radius,
-                                     ANALYSIS_WAVELENGTH, RESULTS_DIR)
+        plotter.plot_circle_detection(ref_projection_uint8, reference_fiducials, center, radius,
+                                     f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR, CIRCLE_CROP_REGION)
 
     # =============================================================================
     # STEP 4: COMPUTE HOMOGRAPHY AND REGISTER SAMPLE
@@ -210,42 +232,36 @@ def process_sample(sample_name):
     if 'reprojection_error' in quality_metrics:
         print(f"   Reprojection error: {quality_metrics['reprojection_error']:.4f} pixels")
 
-    # Register the sample cube
-    print("   Registering sample cube...")
-    registered_sample_cube = registrator.register_cube(sample_cube, homography_matrix)
+    # Register the sample reflectance cube (not the raw cube)
+    print("   Registering sample reflectance cube...")
+    registered_sample_reflectance = registrator.register_cube(sample_reflectance, homography_matrix)
+
+    # Create registered projection for visualization
+    registered_sample_projection = analyzer.create_projection(registered_sample_reflectance, filtered_wavelengths, proj_wl_range)
+    registered_projection_uint8 = (registered_sample_projection * 255).astype(np.uint8)
 
     # Visualize registration assets using plotter
     if GENERATE_PLOTS:
-        registered_band = registered_sample_cube[:, :, band_idx]
-        plotter.plot_registration(ref_band, registered_band, reference_fiducials, RESULTS_DIR)
+        plotter.plot_registration(ref_projection_uint8, registered_projection_uint8, reference_fiducials, RESULTS_DIR)
 
     # =============================================================================
-    # STEP 5: CREATE IC ROI MASK AND COMPUTE REFLECTANCE
+    # STEP 5: CREATE IC ROI MASK FOR ANALYSIS
     # =============================================================================
-
-    print(f"\n{'='*20} STEP 5: REFLECTANCE COMPUTATION {'='*20}")
+    print(f"\n{'='*20} STEP 5: ROI MASK CREATION {'='*20}")
 
     # Create ROI mask from IC circle
     print("   Creating IC ROI mask...")
-    roi_mask = registrator.create_roi_mask(ref_band.shape, ic_circle)
+    roi_mask = registrator.create_roi_mask(reference_projection.shape, ic_circle)
     print(f"   ROI contains {np.sum(roi_mask):,} pixels")
 
-    # Initialize reflectance analyzer
-    analyzer = ReflectanceAnalyzer()
-
-    # Compute reflectance for reference and sample
-    print("   Computing reference reflectance...")
-    reference_reflectance = analyzer.compute_reflectance(reference_cube, white_cube, dark_cube)
-
-    print("   Computing sample reflectance...")
-    sample_reflectance = analyzer.compute_reflectance(registered_sample_cube, white_cube, dark_cube)
-
-    # Visualize ROI and reflectance using plotter
+    # Visualize ROI and reflectance using plotter (using projection for display)
     if GENERATE_PLOTS:
-        registered_band = registered_sample_cube[:, :, band_idx]
-        plotter.plot_reflectance(ref_band, registered_band, roi_mask,
-                                reference_reflectance, sample_reflectance, band_idx,
-                                sample_name, ANALYSIS_WAVELENGTH, RESULTS_DIR)
+        # For visualization, use the middle band from reflectance data
+        analysis_band_idx = len(filtered_wavelengths) // 2
+
+        plotter.plot_reflectance(ref_projection_uint8, registered_projection_uint8, roi_mask,
+                                reference_reflectance, registered_sample_reflectance, analysis_band_idx,
+                                sample_name, f"Projection_{proj_wl_range[0]}-{proj_wl_range[1]}nm", RESULTS_DIR)
 
     # =============================================================================
     # STEP 6: HYPERSPECTRAL ANALYSIS
@@ -254,11 +270,11 @@ def process_sample(sample_name):
     print(f"\n{'='*20} STEP 6: HYPERSPECTRAL ANALYSIS {'='*20}")
 
     # Initialize hyperspectral analyzer
-    analyzer = HyperspectralAnalyzer()
+    hyperspectral_analyzer = HyperspectralAnalyzer()
 
-    # Perform complete analysis
-    results = analyzer.analyze_sample(
-        sample_reflectance,
+    # Perform complete analysis using registered sample reflectance
+    results = hyperspectral_analyzer.analyze_sample(
+        registered_sample_reflectance,
         reference_reflectance,
         center,
         roi_mask,
