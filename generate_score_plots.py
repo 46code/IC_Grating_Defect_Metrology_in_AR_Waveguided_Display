@@ -131,7 +131,7 @@ def collect_analysis_data(samples, results_dir_prefix):
 def extract_sample_number(sample_name, sample_type):
     """
     Extract sample number from sample name, handling all variations and typos
-    Examples: sample01, Sample01, smple14, defect1, Defect10, etc.
+    Examples: sample01, Sample01, sample14, defect1, Defect10, etc.
     """
     import re
 
@@ -141,7 +141,7 @@ def extract_sample_number(sample_name, sample_type):
         # Handle various sample patterns (including typos)
         sample_patterns = [
             r'sample(\d+)',     # sample01, sample1
-            r'smple(\d+)',      # smple14 (typo)
+            r'smple(\d+)',      # sample14 (typo)
             r'samp(\d+)',       # samp01 (abbreviation)
             r'sam(\d+)',        # sam01 (short form)
             r's(\d+)',          # s01 (very short)
