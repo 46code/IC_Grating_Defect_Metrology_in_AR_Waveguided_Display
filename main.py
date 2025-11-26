@@ -311,7 +311,7 @@ def process_sample(sample_name):
     # Visualize analysis maps using plotter and get crop parameters for uniformity plot
     if GENERATE_PLOTS:
         crop_params = plotter.plot_analysis_maps(rmse_results['rmse_map'], sam_results['sam_map'],
-                                                 roi_mask, center, rmse_results, ring_results,
+                                                 roi_mask, center, rmse_results, sam_results, ring_results,
                                                  sample_name, RESULTS_DIR)
     else:
         # Need crop parameters for uniformity analysis even when not plotting

@@ -128,7 +128,7 @@ class HyperspectralPlotter:
             ax.text(x+15, y-15, f'R{orig_idx+1}', color='blue', fontsize=10, fontweight='bold')
 
         # Draw IC circle
-        circle_patch = plt.Circle(display_center, radius, fill=False, color='lime', linewidth=3)
+        circle_patch = plt.Circle(display_center, radius, fill=False, color='lime', linewidth=1)
         ax.add_patch(circle_patch)
         ax.plot(display_center[0], display_center[1], '+', color='lime', markersize=15, markeredgewidth=3)
 
@@ -206,7 +206,7 @@ class HyperspectralPlotter:
         plt.close()
 
     def plot_analysis_maps(self, rmse_map, sam_map, roi_mask, center,
-                          rmse_results, ring_results, sample_name, results_dir):
+                          rmse_results, sam_results, ring_results, sample_name, results_dir):
         """Plot RMSE and SAM analysis maps"""
         # Calculate zoom bounds
         roi_coords = np.where(roi_mask)
@@ -234,7 +234,7 @@ class HyperspectralPlotter:
         ax1 = axes[0]
         rmse_masked = np.where(roi_crop, rmse_crop, np.nan)
         im1 = ax1.imshow(rmse_masked, cmap='hot', alpha=0.8)
-        ax1.set_title(f'RMSE Map\nOverall: {rmse_results["overall_rmse"]:.4f}, Per-Pixel Mean: {rmse_results["rmse_per_pixel_mean"]:.4f}',
+        ax1.set_title(f'RMSE Map\nOverall: {rmse_results["overall_rmse"]:.4f}, Per-Pixel Mean: {rmse_results["rmse_per_pixel_mean"]:.4f}, Per-Pixel P95: {rmse_results["rmse_per_pixel_p95"]:.4f}',
                       fontweight='bold', fontsize=14)
 
         # Add circles and rings
@@ -249,7 +249,9 @@ class HyperspectralPlotter:
         ax2 = axes[1]
         sam_masked = np.where(roi_crop, sam_crop, np.nan)
         im2 = ax2.imshow(sam_masked, cmap='viridis', alpha=0.8)
-        ax2.set_title(f'SAM Map (for Ring Delta & Uniformity)\nRing Delta: {ring_results["delta_ring"]:.4f} rad',
+
+        # Use actual SAM mean from the analysis results
+        ax2.set_title(f'SAM Map\nSAM Mean: {sam_results["sam_mean"]:.4f} rad, Ring Delta: {ring_results["delta_ring"]:.4f} rad',
                       fontweight='bold', fontsize=14)
 
         self._add_circles_and_rings(ax2, circle_center_crop, max_radius, inner_radius, outer_radius_start)
