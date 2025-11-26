@@ -141,7 +141,7 @@ def main():
     PERCENTILE_THRESHOLD = 7  # Percentile threshold (1-10 typically)
 
     # Load Sample01 data
-    sample_path = Path("./Gage R&R/KhangT1/Sample22")
+    sample_path = Path("../Gage R&R/KhangT1/Sample22")
 
     if not sample_path.exists():
         print(f"❌ Sample path not found: {sample_path}")

@@ -210,7 +210,7 @@ def main():
     MAX_RADIUS = 100   # Maximum circle radius
 
     # Load Reference data (where we expect to find circles)
-    reference_path = Path("./Gage R&R/KhangT2/Reference")
+    reference_path = Path("../Gage R&R/KhangT2/Reference")
 
     if not reference_path.exists():
         print(f"❌ Reference path not found: {reference_path}")
