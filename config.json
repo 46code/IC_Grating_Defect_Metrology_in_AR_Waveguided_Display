@@ -1,10 +1,13 @@
 {
   "data_paths": {
     "base_path": "./Gage R&R",
+
     "reference_path": "${base_path}/KhangT2/Reference",
     "reference_white_path": "${base_path}/KhangT2/White",
     "reference_dark_path": "${base_path}/KhangT2/Dark",
+
     "results_dir_prefix": "results/LuelT2",
+
     "sample_white_path": "${base_path}/LuelT2/White",
     "sample_dark_path": "${base_path}/LuelT2/Dark",
     "sample_path": "${base_path}/LuelT2",
