@@ -24,9 +24,9 @@ OPERATORS = [
 ]
 
 # Different percentile_threshold values for each trial
-PERCENTILE_THRESHOLDS = [3.4, 3.8, 4, 3.3, 3.3, 4, 4, 3.9]
+PERCENTILE_THRESHOLDS = [3.4, 3.8, 4, 3.3, 3.45, 4, 4, 3.9]
 # 450 - 800: 3.5, 3.8, 4.2, 3.5, 3.4, 3.93, 4.5, 3.9
-# 450 - 950: 3.4, 3.8, 4, 3.3, 3.3, 4, 4, 3.9
+# 450 - 950: 3.4, 3.8, 4, 3.3, 3.45, 4, 4, 3.9
 
 def update_config_for_trial(operator, percentile_threshold):
     """Update config.json for the current trial"""
