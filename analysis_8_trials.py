@@ -50,10 +50,23 @@ OPERATOR_INFO = {
 }
 
 # Quality thresholds (from config.json)
-THRESHOLDS = {
+# Main CTQ thresholds for combined analysis
+MAIN_THRESHOLDS = {
     "RMSE Per Pixel P95": 0.08,      # max threshold (lower is better)
-    "SAM Mean": 2.6,                 # max threshold (lower is better)
-    "Uniformity Score": 0.6          # min threshold (higher is better)
+    "SAM Mean": 3.2,                 # max threshold (lower is better)
+    "Uniformity Score": 0.4          # min threshold (higher is better)
+}
+
+# Comprehensive CTQ thresholds for all metrics
+ALL_THRESHOLDS = {
+    "RMSE_Overall": 0.08,            # max threshold (lower is better)
+    "RMSE_Per_Pixel_Mean": 0.08,     # max threshold (lower is better)
+    "RMSE_Per_Pixel_Median": 0.08,   # max threshold (lower is better)
+    "RMSE_Per_Pixel_P95": 0.08,      # max threshold (lower is better)
+    "SAM_Mean": 3.2,                 # max threshold (lower is better)
+    "SAM_Median": 4,               # max threshold (lower is better)
+    "SAM_P95": 4,                  # max threshold (lower is better)
+    "Uniformity_Score": 0.4          # min threshold (higher is better)
 }
 
 # Define expected results based on test design
@@ -68,8 +81,8 @@ def extract_numeric_sam(sam_str):
     return sam_str
 
 def load_operator_data(operator):
-    """Load final_summary_table.csv for a specific operator"""
-    csv_path = f"results/450-800/{operator}/scatter_plots/final_summary_table.csv"
+    """Load batch_analysis_summary.csv for a specific operator"""
+    csv_path = f"results/{operator}/scatter_plots/batch_analysis_summary.csv"
 
     if not os.path.exists(csv_path):
         print(f"⚠️  Warning: {csv_path} not found")
@@ -77,10 +90,6 @@ def load_operator_data(operator):
 
     try:
         df = pd.read_csv(csv_path)
-
-        # Clean SAM Mean column (remove ° symbol)
-        if 'SAM Mean' in df.columns:
-            df['SAM Mean'] = df['SAM Mean'].apply(extract_numeric_sam)
 
         # Add operator info
         df['Operator'] = operator
@@ -96,24 +105,34 @@ def load_operator_data(operator):
 
 def calculate_gage_rr_statistics(combined_df):
     """Calculate measurement system statistics appropriate for defect detection validation"""
+    # Map old column names to new ones from batch_analysis_summary.csv
+    ctq_mapping = {
+        "RMSE Per Pixel P95": "RMSE_Per_Pixel_P95",
+        "SAM Mean": "SAM_Mean",
+        "Uniformity Score": "Uniformity_Score"
+    }
+
     ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
     results = {}
 
     for ctq in ctq_metrics:
-        if ctq not in combined_df.columns:
-            print(f"⚠️  Warning: {ctq} not found in data")
+        # Use mapped column name
+        actual_column = ctq_mapping.get(ctq, ctq)
+
+        if actual_column not in combined_df.columns:
+            print(f"⚠️  Warning: {actual_column} not found in data")
             continue
 
         # Remove any non-numeric values
-        data = combined_df.dropna(subset=[ctq])
+        data = combined_df.dropna(subset=[actual_column])
 
         if len(data) == 0:
             continue
 
         # Get basic statistics
-        total_var = data[ctq].var()
-        mean_value = data[ctq].mean()
-        std_value = data[ctq].std()
+        total_var = data[actual_column].var()
+        mean_value = data[actual_column].mean()
+        std_value = data[actual_column].std()
 
         # For defect detection validation, we focus on:
         # 1. Measurement consistency within operators (repeatability)
@@ -129,7 +148,7 @@ def calculate_gage_rr_statistics(combined_df):
             # Group by sample within operator
             sample_stds = []
             for sample in op_data['Sample'].unique():
-                sample_data = op_data[op_data['Sample'] == sample][ctq]
+                sample_data = op_data[op_data['Sample'] == sample][actual_column]
                 if len(sample_data) > 1:
                     sample_stds.append(sample_data.std())
 
@@ -143,7 +162,7 @@ def calculate_gage_rr_statistics(combined_df):
         for sample in data['Sample'].unique():
             sample_data = data[data['Sample'] == sample]
             if len(sample_data['Operator'].unique()) > 1:
-                op_means = sample_data.groupby('Operator')[ctq].mean()
+                op_means = sample_data.groupby('Operator')[actual_column].mean()
                 sample_between_op_std.append(op_means.std())
 
         avg_reproducibility_std = np.mean(sample_between_op_std) if sample_between_op_std else 0
@@ -154,8 +173,8 @@ def calculate_gage_rr_statistics(combined_df):
         defective_sample_data = data[~data['Sample'].isin(['Sample04', 'sample04', 'Sample20', 'sample20'])]
 
         if len(good_sample_data) > 0 and len(defective_sample_data) > 0:
-            good_mean = good_sample_data[ctq].mean()
-            defective_mean = defective_sample_data[ctq].mean()
+            good_mean = good_sample_data[actual_column].mean()
+            defective_mean = defective_sample_data[actual_column].mean()
 
             # Signal-to-noise ratio: difference between groups vs measurement noise
             signal = abs(good_mean - defective_mean)
@@ -164,8 +183,8 @@ def calculate_gage_rr_statistics(combined_df):
             discrimination_ratio = signal / noise
 
             # Calculate separation between good and defective samples in standard deviations
-            pooled_std = np.sqrt(((len(good_sample_data) - 1) * good_sample_data[ctq].var() +
-                                 (len(defective_sample_data) - 1) * defective_sample_data[ctq].var()) /
+            pooled_std = np.sqrt(((len(good_sample_data) - 1) * good_sample_data[actual_column].var() +
+                                 (len(defective_sample_data) - 1) * defective_sample_data[actual_column].var()) /
                                 (len(good_sample_data) + len(defective_sample_data) - 2))
 
             if pooled_std > 0:
@@ -246,17 +265,38 @@ def calculate_gage_rr_statistics(combined_df):
 
 def create_ctq_summary_plots(combined_df, gage_rr_stats):
     """Create comprehensive CTQ analysis plots"""
-    ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
+    # Map old column names to new ones from batch_analysis_summary.csv
+    ctq_mapping = {
+        "RMSE Per Pixel P95": "RMSE_Per_Pixel_P95",
+        "SAM Mean": "SAM_Mean",
+        "Uniformity Score": "Uniformity_Score"
+    }
+
+    # Main 3 CTQs for box plots
+    main_ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
+
+    # All CTQs available in batch_analysis_summary.csv for sample performance plots
+    all_ctq_metrics = [
+        ("RMSE_Overall", "RMSE Overall", "Max", ALL_THRESHOLDS["RMSE_Overall"]),
+        ("RMSE_Per_Pixel_Mean", "RMSE Per Pixel Mean", "Max", ALL_THRESHOLDS["RMSE_Per_Pixel_Mean"]),
+        ("RMSE_Per_Pixel_Median", "RMSE Per Pixel Median", "Max", ALL_THRESHOLDS["RMSE_Per_Pixel_Median"]),
+        ("RMSE_Per_Pixel_P95", "RMSE Per Pixel P95", "Max", ALL_THRESHOLDS["RMSE_Per_Pixel_P95"]),
+        ("SAM_Mean", "SAM Mean", "Max", ALL_THRESHOLDS["SAM_Mean"]),
+        ("SAM_Median", "SAM Median", "Max", ALL_THRESHOLDS["SAM_Median"]),
+        ("SAM_P95", "SAM P95", "Max", ALL_THRESHOLDS["SAM_P95"]),
+        ("Uniformity_Score", "Uniformity Score", "Min", ALL_THRESHOLDS["Uniformity_Score"])
+    ]
 
     # Create output directory
-    os.makedirs("gage_rr_analysis", exist_ok=True)
+    os.makedirs("analysis_results", exist_ok=True)
 
-    # 1. Box plots by operator
+    # 1. Box plots by operator (main 3 CTQs only)
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     fig.suptitle('Gage R&R CTQ Analysis - Box Plots by Operator', fontsize=16, fontweight='bold')
 
-    for i, ctq in enumerate(ctq_metrics):
-        if ctq not in combined_df.columns:
+    for i, ctq in enumerate(main_ctq_metrics):
+        actual_column = ctq_mapping.get(ctq, ctq)
+        if actual_column not in combined_df.columns:
             continue
 
         if i < 2:
@@ -265,7 +305,7 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
             ax = axes[1, 0]
 
         # Create box plot
-        box_data = [combined_df[combined_df['Operator'] == op][ctq].dropna()
+        box_data = [combined_df[combined_df['Operator'] == op][actual_column].dropna()
                    for op in OPERATORS if op in combined_df['Operator'].unique()]
         box_labels = [op for op in OPERATORS if op in combined_df['Operator'].unique()]
 
@@ -278,7 +318,7 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
             patch.set_alpha(0.7)
 
         # Add threshold line
-        threshold = THRESHOLDS[ctq]
+        threshold = MAIN_THRESHOLDS[ctq]
         if ctq == "Uniformity Score":
             ax.axhline(y=threshold, color='red', linestyle='--', alpha=0.7,
                       label=f'Min Threshold: {threshold}')
@@ -297,16 +337,17 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
     axes[1, 1].remove()
 
     plt.tight_layout()
-    plt.savefig('gage_rr_analysis/ctq_boxplots_by_operator.png', dpi=300, bbox_inches='tight')
+    plt.savefig('analysis_results/ctq_boxplots_by_operator.png', dpi=300, bbox_inches='tight')
     plt.show()
 
-    # 2. Sample-level analysis across operators - Split into 3 separate plots
-    for ctq_idx, ctq in enumerate(ctq_metrics):
-        if ctq not in combined_df.columns:
+    # 2. Sample-level analysis across operators - Create plots for ALL CTQs
+    for column_name, display_name, threshold_type, threshold in all_ctq_metrics:
+        if column_name not in combined_df.columns:
+            print(f"⚠️  Skipping {display_name} - column {column_name} not found in data")
             continue
 
         fig, ax = plt.subplots(1, 1, figsize=(14, 8))
-        fig.suptitle(f'{ctq} - Sample Performance Across All Operators', fontsize=16, fontweight='bold')
+        fig.suptitle(f'{display_name} - Sample Performance Across All Operators', fontsize=16, fontweight='bold')
 
         # Get all unique sample numbers and sort them
         all_sample_nums = []
@@ -323,7 +364,7 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
             if operator in combined_df['Operator'].unique():
                 op_data = combined_df[combined_df['Operator'] == operator]
                 sample_nums = op_data['Sample'].str.replace('Sample', '').str.replace('sample', '').astype(int)
-                values = op_data[ctq].dropna()
+                values = op_data[column_name].dropna()
 
                 # Map sample numbers to evenly spaced x positions
                 x_positions = [unique_sample_nums.index(num) for num in sample_nums]
@@ -333,8 +374,7 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
                 ax.scatter(x_positions, values, alpha=0.7, label=operator, s=60, color=color)
 
         # Add threshold line
-        threshold = THRESHOLDS[ctq]
-        if ctq == "Uniformity Score":
+        if threshold_type == "Min":
             ax.axhline(y=threshold, color='red', linestyle='--', alpha=0.8, linewidth=2,
                       label=f'Min Threshold: {threshold}')
         else:
@@ -345,48 +385,68 @@ def create_ctq_summary_plots(combined_df, gage_rr_stats):
         ax.set_xticks(range(len(unique_sample_nums)))
         ax.set_xticklabels([f'{num:02d}' for num in unique_sample_nums])
 
-        ax.set_title(f'{ctq} by Sample Number')
+        ax.set_title(f'{display_name} by Sample Number')
         ax.set_xlabel('Sample Number')
-        ax.set_ylabel(ctq)
+        ax.set_ylabel(display_name)
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
 
         # Set reasonable y-axis limits based on data
-        all_values = combined_df[ctq].dropna()
-        y_min, y_max = all_values.min(), all_values.max()
-        y_range = y_max - y_min
-        ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
+        all_values = combined_df[column_name].dropna()
+        if len(all_values) > 0:
+            y_min, y_max = all_values.min(), all_values.max()
+            y_range = y_max - y_min
+            if y_range > 0:
+                ax.set_ylim(y_min - 0.1*y_range, y_max + 0.1*y_range)
 
         plt.tight_layout()
 
         # Save each CTQ plot separately
-        ctq_filename = ctq.replace(' ', '_').replace('/', '_').lower()
-        plt.savefig(f'gage_rr_analysis/{ctq_filename}_by_samples.png', dpi=300, bbox_inches='tight')
+        ctq_filename = display_name.replace(' ', '_').replace('/', '_').lower()
+        plt.savefig(f'analysis_results/{ctq_filename}_by_samples.png', dpi=300, bbox_inches='tight')
         plt.show()
 
-    # Removed the Pass/Fail analysis by sample plot
+        print(f"✅ Generated sample performance plot for {display_name}")
 
 def analyze_pass_fail_rates(combined_df):
     """Comprehensive pass/fail analysis across all CTQs and operators"""
+    # Map old column names to new ones from batch_analysis_summary.csv
+    ctq_mapping = {
+        "RMSE Per Pixel P95": "RMSE_Per_Pixel_P95",
+        "SAM Mean": "SAM_Mean",
+        "Uniformity Score": "Uniformity_Score"
+    }
+
     ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
 
-    # Create pass/fail status for each CTQ
+    # Create pass/fail status for each CTQ (main 3 CTQs only)
     for ctq in ctq_metrics:
-        if ctq not in combined_df.columns:
+        actual_column = ctq_mapping.get(ctq, ctq)
+        if actual_column not in combined_df.columns:
             continue
 
-        threshold = THRESHOLDS[ctq]
+        threshold = MAIN_THRESHOLDS[ctq]
         if ctq == "Uniformity Score":
             # Higher is better - pass if >= threshold
-            combined_df[f'{ctq}_Pass'] = combined_df[ctq] >= threshold
+            combined_df[f'{ctq}_Pass'] = combined_df[actual_column] >= threshold
         else:
             # Lower is better - pass if <= threshold
-            combined_df[f'{ctq}_Pass'] = combined_df[ctq] <= threshold
+            combined_df[f'{ctq}_Pass'] = combined_df[actual_column] <= threshold
 
-    # Overall pass status (must pass ALL CTQs)
+    # Overall pass status (must pass ALL main CTQs)
     pass_columns = [f'{ctq}_Pass' for ctq in ctq_metrics if f'{ctq}_Pass' in combined_df.columns]
     if pass_columns:
         combined_df['Overall_Pass'] = combined_df[pass_columns].all(axis=1)
+
+    # Create pass/fail status for ALL CTQs
+    for ctq_col, threshold in ALL_THRESHOLDS.items():
+        if ctq_col in combined_df.columns:
+            if ctq_col == "Uniformity_Score":
+                # Higher is better - pass if >= threshold
+                combined_df[f'{ctq_col}_Pass'] = combined_df[ctq_col] >= threshold
+            else:
+                # Lower is better - pass if <= threshold
+                combined_df[f'{ctq_col}_Pass'] = combined_df[ctq_col] <= threshold
 
     return combined_df
 
@@ -504,7 +564,7 @@ def create_pass_fail_visualizations(combined_df):
         ax.legend()
 
     plt.tight_layout()
-    plt.savefig('gage_rr_analysis/pass_fail_rates_by_operator.png', dpi=300, bbox_inches='tight')
+    plt.savefig('analysis_results/pass_fail_rates_by_operator.png', dpi=300, bbox_inches='tight')
     plt.show()
 
     # 2. Sample Pass/Fail Analysis Across All Operators
@@ -570,7 +630,7 @@ def create_pass_fail_visualizations(combined_df):
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig('gage_rr_analysis/sample_pass_fail_analysis.png', dpi=300, bbox_inches='tight')
+    plt.savefig('analysis_results/sample_pass_fail_analysis.png', dpi=300, bbox_inches='tight')
     plt.show()
 
     # 3. Person vs Trial Analysis
@@ -650,7 +710,7 @@ def create_pass_fail_visualizations(combined_df):
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig('gage_rr_analysis/person_trial_comparison.png', dpi=300, bbox_inches='tight')
+    plt.savefig('analysis_results/person_trial_comparison.png', dpi=300, bbox_inches='tight')
     plt.show()
 
     return pass_rate_df, person_trial_df
@@ -664,7 +724,7 @@ def generate_ctq_report(combined_df, gage_rr_stats, pass_rate_df=None, person_tr
     report_lines.append("=" * 80)
 
     # Overview
-    report_lines.append(f"Analysis Date: November 26, 2025")
+    report_lines.append(f"Analysis Date: November 30, 2025")
     report_lines.append(f"Total Operators: {len(OPERATORS)} (4 persons × 2 trials)")
     report_lines.append(f"Total Samples: {len(combined_df)}")
     report_lines.append(f"CTQs Analyzed: RMSE Per Pixel P95, SAM Mean, Uniformity Score")
@@ -689,7 +749,7 @@ def generate_ctq_report(combined_df, gage_rr_stats, pass_rate_df=None, person_tr
             continue
 
         stats = gage_rr_stats[ctq]
-        threshold = THRESHOLDS[ctq]
+        threshold = MAIN_THRESHOLDS[ctq]
 
         report_lines.append(f"CTQ: {ctq}")
         report_lines.append("=" * len(f"CTQ: {ctq}"))
@@ -724,14 +784,25 @@ def generate_ctq_report(combined_df, gage_rr_stats, pass_rate_df=None, person_tr
         report_lines.append("")
 
         # Pass rate analysis
-        data = combined_df.dropna(subset=[ctq])
-        if ctq == "Uniformity Score":
-            pass_count = len(data[data[ctq] >= threshold])
-        else:
-            pass_count = len(data[data[ctq] <= threshold])
+        ctq_mapping = {
+            "RMSE Per Pixel P95": "RMSE_Per_Pixel_P95",
+            "SAM Mean": "SAM_Mean",
+            "Uniformity Score": "Uniformity_Score"
+        }
+        actual_column = ctq_mapping.get(ctq, ctq)
 
-        pass_rate = (pass_count / len(data)) * 100
-        report_lines.append(f"Pass Rate: {pass_count}/{len(data)} ({pass_rate:.1f}%)")
+        if actual_column in combined_df.columns:
+            data = combined_df.dropna(subset=[actual_column])
+            if ctq == "Uniformity Score":
+                pass_count = len(data[data[actual_column] >= threshold])
+            else:
+                pass_count = len(data[data[actual_column] <= threshold])
+
+            pass_rate = (pass_count / len(data)) * 100
+            report_lines.append(f"Pass Rate: {pass_count}/{len(data)} ({pass_rate:.1f}%)")
+        else:
+            report_lines.append(f"Pass Rate: N/A (column {actual_column} not found)")
+
         report_lines.append("")
         report_lines.append("-" * 60)
         report_lines.append("")
@@ -895,8 +966,8 @@ def generate_ctq_report(combined_df, gage_rr_stats, pass_rate_df=None, person_tr
     # Save report
     report_text = "\n".join(report_lines)
 
-    os.makedirs("gage_rr_analysis", exist_ok=True)
-    with open("gage_rr_analysis/gage_rr_ctq_report.txt", "w") as f:
+    os.makedirs("analysis_results", exist_ok=True)
+    with open("analysis_results/gage_rr_ctq_report.txt", "w") as f:
         f.write(report_text)
 
     print("\n" + report_text)
@@ -1091,7 +1162,7 @@ def create_defect_detection_visualizations(detection_df, detection_metrics):
     ax4.set_yticklabels(['Good', 'Defective'])
 
     plt.tight_layout()
-    plt.savefig('gage_rr_analysis/defect_detection_performance.png', dpi=300, bbox_inches='tight')
+    plt.savefig('analysis_results/defect_detection_performance.png', dpi=300, bbox_inches='tight')
     plt.show()
 
     return detection_df
@@ -1137,278 +1208,105 @@ def main():
     print("\n📈 Creating CTQ analysis plots...")
     create_ctq_summary_plots(combined_df, gage_rr_stats)
 
-    # Create pass/fail visualizations
-    print("\n📊 Creating pass/fail analysis visualizations...")
-    pass_rate_df, person_trial_df = create_pass_fail_visualizations(combined_df)
-
-    # Create defect detection visualizations
-    print("\n🔍 Creating defect detection performance visualizations...")
-    create_defect_detection_visualizations(detection_df, detection_metrics)
-
     # Generate comprehensive report
     print("\n📋 Generating comprehensive analysis report...")
-    generate_comprehensive_report(combined_df, gage_rr_stats, pass_rate_df, person_trial_df, detection_df, detection_metrics)
+    # Create pass rate dataframes for reporting without creating visualizations
+    pass_rate_data = []
+    for operator in OPERATORS:
+        if operator not in combined_df['Operator'].unique():
+            continue
 
-    # Save combined dataset
-    os.makedirs("gage_rr_analysis", exist_ok=True)
-    combined_df.to_csv("gage_rr_analysis/combined_ctq_data.csv", index=False)
+        op_data = combined_df[combined_df['Operator'] == operator]
+        row = {'Operator': operator, 'Person': OPERATOR_INFO[operator]['person'],
+               'Trial': OPERATOR_INFO[operator]['trial']}
+
+        ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
+        for ctq in ctq_metrics:
+            if f'{ctq}_Pass' in combined_df.columns:
+                pass_count = op_data[f'{ctq}_Pass'].sum()
+                total_count = len(op_data[f'{ctq}_Pass'].dropna())
+                pass_rate = (pass_count / total_count * 100) if total_count > 0 else 0
+                row[f'{ctq}_PassRate'] = pass_rate
+
+        if 'Overall_Pass' in combined_df.columns:
+            pass_count = op_data['Overall_Pass'].sum()
+            total_count = len(op_data['Overall_Pass'].dropna())
+            row['Overall_PassRate'] = (pass_count / total_count * 100) if total_count > 0 else 0
+
+        pass_rate_data.append(row)
+
+    pass_rate_df = pd.DataFrame(pass_rate_data)
+
+    # Create person trial data for reporting
+    person_trial_data = []
+    for person in ['Khang', 'Kidu', 'Luel', 'Anirban']:
+        for trial in [1, 2]:
+            operator = f"{person}T{trial}"
+            if operator in combined_df['Operator'].unique():
+                op_data = combined_df[combined_df['Operator'] == operator]
+                row = {'Person': person, 'Trial': trial, 'Operator': operator}
+
+                for ctq in ctq_metrics:
+                    if f'{ctq}_Pass' in combined_df.columns:
+                        pass_count = op_data[f'{ctq}_Pass'].sum()
+                        total_count = len(op_data[f'{ctq}_Pass'].dropna())
+                        pass_rate = (pass_count / total_count * 100) if total_count > 0 else 0
+                        row[f'{ctq}_PassRate'] = pass_rate
+
+                if 'Overall_Pass' in combined_df.columns:
+                    pass_count = op_data['Overall_Pass'].sum()
+                    total_count = len(op_data['Overall_Pass'].dropna())
+                    row['Overall_PassRate'] = (pass_count / total_count * 100) if total_count > 0 else 0
+
+                person_trial_data.append(row)
+
+    person_trial_df = pd.DataFrame(person_trial_data)
+
+    # Save datasets as requested
+    print("\n💾 Saving analysis datasets...")
+    os.makedirs("analysis_results", exist_ok=True)
+
+    # 1. Main 3 CTQs dataset (no change from original)
+    main_ctq_columns = ['Sample', 'Operator', 'Person', 'Trial', 'RMSE_Per_Pixel_P95', 'SAM_Mean', 'Uniformity_Score']
+    main_ctq_columns += [col for col in combined_df.columns if '_Pass' in col and any(ctq.replace(' ', '_').replace('Per_Pixel_P95', 'Per_Pixel_P95') in col for ctq in ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"])]
+    main_ctq_columns += ['Overall_Pass'] if 'Overall_Pass' in combined_df.columns else []
+
+    # Filter to include only columns that actually exist
+    main_ctq_columns = [col for col in main_ctq_columns if col in combined_df.columns]
+    combined_main_ctq_df = combined_df[main_ctq_columns].copy()
+
+    # Rename columns to match original format for backward compatibility
+    rename_mapping = {
+        'RMSE_Per_Pixel_P95': 'RMSE Per Pixel P95',
+        'SAM_Mean': 'SAM Mean',
+        'Uniformity_Score': 'Uniformity Score'
+    }
+    combined_main_ctq_df = combined_main_ctq_df.rename(columns=rename_mapping)
+    combined_main_ctq_df.to_csv("analysis_results/main_ctq_data.csv", index=False)
+
+    # 2. All CTQs dataset with individual thresholds (no Overall_Pass)
+    all_ctq_columns = ['Sample', 'Operator', 'Person', 'Trial']
+    all_ctq_columns += list(ALL_THRESHOLDS.keys())  # Add all CTQ metrics
+    all_ctq_columns += [f"{ctq}_Pass" for ctq in ALL_THRESHOLDS.keys()]  # Add pass/fail for each CTQ
+
+    # Filter to include only columns that actually exist
+    all_ctq_columns = [col for col in all_ctq_columns if col in combined_df.columns]
+    combined_all_ctq_df = combined_df[all_ctq_columns].copy()
+    combined_all_ctq_df.to_csv("analysis_results/all_ctq_data_with_thresholds.csv", index=False)
 
     print(f"\n✅ Analysis complete!")
-    print(f"📁 Results saved in: gage_rr_analysis/")
+    print(f"📁 Results saved in: analysis_results/")
     print(f"   - gage_rr_defect_detection_report.txt (comprehensive report)")
     print(f"   - ctq_boxplots_by_operator.png")
     print(f"   - rmse_per_pixel_p95_by_samples.png")
     print(f"   - sam_mean_by_samples.png")
     print(f"   - uniformity_score_by_samples.png")
-    print(f"   - pass_fail_rates_by_operator.png")
-    print(f"   - sample_pass_fail_analysis.png")
-    print(f"   - person_trial_comparison.png")
-    print(f"   - defect_detection_performance.png (NEW)")
-    print(f"   - combined_ctq_data.csv")
-
-def generate_comprehensive_report(combined_df, gage_rr_stats, pass_rate_df, person_trial_df, detection_df, detection_metrics):
-    """Generate comprehensive analysis report including defect detection performance"""
-
-    report_lines = []
-    report_lines.append("=" * 80)
-    report_lines.append("IC GRATING DEFECT DETECTION VALIDATION REPORT")
-    report_lines.append("GAGE R&R ANALYSIS WITH DEFECT DETECTION PERFORMANCE")
-    report_lines.append("=" * 80)
-
-    # Test Overview
-    report_lines.append(f"Analysis Date: November 26, 2025")
-    report_lines.append(f"Test Purpose: Validate measurement system's ability to detect IC grating defects")
-    report_lines.append(f"Expected Results:")
-    report_lines.append(f"  ✅ Sample04 & Sample20: PASS (Good IC gratings)")
-    report_lines.append(f"  ❌ All other samples: FAIL (Defective IC gratings)")
-    report_lines.append("")
-    report_lines.append(f"Total Operators: {len(OPERATORS)} (4 persons × 2 trials)")
-    report_lines.append(f"Total Samples: {len(combined_df)}")
-    report_lines.append(f"CTQs Analyzed: RMSE Per Pixel P95, SAM Mean, Uniformity Score")
-    report_lines.append("")
-
-    # DEFECT DETECTION PERFORMANCE SECTION
-    report_lines.append("DEFECT DETECTION PERFORMANCE:")
-    report_lines.append("=" * 35)
-
-    report_lines.append(f"Overall Detection Accuracy: {detection_metrics['overall_accuracy']:.1f}%")
-    report_lines.append(f"Sensitivity (Defect Detection): {detection_metrics['sensitivity']:.1f}%")
-    report_lines.append(f"Specificity (Good Part Identification): {detection_metrics['specificity']:.1f}%")
-    report_lines.append("")
-
-    report_lines.append("SAMPLE-BY-SAMPLE DETECTION RESULTS:")
-    report_lines.append("-" * 45)
-
-    for _, row in detection_df.iterrows():
-        sample_num = row['Sample']
-        expected = row['Expected']
-        actual = row['Actual']
-        pass_rate = row['Pass_Rate']
-        correct = row['Correct_Detection']
-        sample_type = row['Sample_Type']
-
-        status = "✅ CORRECT" if correct else "❌ INCORRECT"
-        report_lines.append(f"Sample{sample_num:02d} ({sample_type}): Expected {expected}, Got {actual} ({pass_rate:.0f}% pass rate) - {status}")
-
-    report_lines.append("")
-
-    # Detection Performance Assessment
-    if detection_metrics['overall_accuracy'] >= 90:
-        detection_assessment = "EXCELLENT"
-    elif detection_metrics['overall_accuracy'] >= 70:
-        detection_assessment = "GOOD"
-    else:
-        detection_assessment = "NEEDS IMPROVEMENT"
-
-    report_lines.append(f"Detection Performance Assessment: {detection_assessment}")
-    report_lines.append("")
-
-    # Identify specific detection issues
-    incorrect_detections = detection_df[detection_df['Correct_Detection'] == False]
-    if len(incorrect_detections) > 0:
-        report_lines.append("DETECTION ERRORS:")
-        report_lines.append("-" * 20)
-        for _, row in incorrect_detections.iterrows():
-            sample_num = row['Sample']
-            expected = row['Expected']
-            actual = row['Actual']
-            sample_type = row['Sample_Type']
-
-            if sample_type == 'Good' and actual == 'FAIL':
-                error_type = "False Negative (Good part rejected)"
-            elif sample_type == 'Defective' and actual == 'PASS':
-                error_type = "False Positive (Defective part accepted)"
-            else:
-                error_type = "Detection error"
-
-            report_lines.append(f"  • Sample{sample_num:02d}: {error_type}")
-        report_lines.append("")
-
-    report_lines.append("-" * 60)
-    report_lines.append("")
-
-    # Operator Summary
-    report_lines.append("OPERATOR SUMMARY:")
-    report_lines.append("-" * 40)
-    for operator in OPERATORS:
-        if operator in combined_df['Operator'].unique():
-            count = len(combined_df[combined_df['Operator'] == operator])
-            person = OPERATOR_INFO[operator]['person']
-            trial = OPERATOR_INFO[operator]['trial']
-            report_lines.append(f"  {operator}: {person} Trial {trial} ({count} samples)")
-    report_lines.append("")
-
-    # CTQ Analysis
-    ctq_metrics = ["RMSE Per Pixel P95", "SAM Mean", "Uniformity Score"]
-
-    for ctq in ctq_metrics:
-        if ctq not in gage_rr_stats:
-            continue
-
-        stats = gage_rr_stats[ctq]
-        threshold = THRESHOLDS[ctq]
-
-        report_lines.append(f"CTQ: {ctq}")
-        report_lines.append("=" * len(f"CTQ: {ctq}"))
-
-        # Basic statistics
-        report_lines.append(f"Mean Value: {stats['mean_value']:.4f}")
-        report_lines.append(f"Standard Deviation: {stats['std_value']:.4f}")
-        report_lines.append(f"Coefficient of Variation: {stats['cv_percent']:.1f}%")
-        report_lines.append(f"Threshold: {threshold} ({'min' if ctq == 'Uniformity Score' else 'max'})")
-        report_lines.append("")
-
-        # Gage R&R Components
-        report_lines.append("Gage R&R Variance Components:")
-        report_lines.append(f"  Repeatability: {stats['repeatability_percent']:.1f}%")
-        report_lines.append(f"  Reproducibility: {stats['reproducibility_percent']:.1f}%")
-        report_lines.append(f"  Total R&R: {stats['measurement_system_percent']:.1f}%")
-        # Part-to-Part variation can be calculated as the complement of measurement system variation
-        part_to_part_pct = 100 - stats['measurement_system_percent']
-        report_lines.append(f"  Part-to-Part: {part_to_part_pct:.1f}%")
-        report_lines.append("")
-
-        # R&R Acceptance Criteria
-        rr_pct = stats['measurement_system_percent']
-        if rr_pct < 10:
-            acceptance = "EXCELLENT"
-        elif rr_pct < 30:
-            acceptance = "ACCEPTABLE"
-        else:
-            acceptance = "NEEDS IMPROVEMENT"
-
-        report_lines.append(f"R&R Assessment: {acceptance} ({rr_pct:.1f}%)")
-        report_lines.append("")
-
-        # Pass rate analysis
-        data = combined_df.dropna(subset=[ctq])
-        if ctq == "Uniformity Score":
-            pass_count = len(data[data[ctq] >= threshold])
-        else:
-            pass_count = len(data[data[ctq] <= threshold])
-
-        pass_rate = (pass_count / len(data)) * 100
-        report_lines.append(f"Pass Rate: {pass_count}/{len(data)} ({pass_rate:.1f}%)")
-        report_lines.append("")
-        report_lines.append("-" * 60)
-        report_lines.append("")
-
-    # Overall Assessment
-    report_lines.append("OVERALL ASSESSMENT:")
-    report_lines.append("=" * 20)
-
-    avg_rr = np.mean([gage_rr_stats[ctq]['measurement_system_percent']
-                     for ctq in ctq_metrics if ctq in gage_rr_stats])
-
-    if avg_rr < 10:
-        overall = "EXCELLENT"
-    elif avg_rr < 30:
-        overall = "ACCEPTABLE"
-    else:
-        overall = "NEEDS IMPROVEMENT"
-
-    report_lines.append(f"Average R&R: {avg_rr:.1f}%")
-    report_lines.append(f"Measurement System: {overall}")
-    report_lines.append(f"Defect Detection: {detection_assessment} ({detection_metrics['overall_accuracy']:.1f}% accuracy)")
-
-    # Overall system assessment
-    if detection_metrics['overall_accuracy'] >= 90 and avg_rr < 30:
-        system_status = "SYSTEM READY FOR PRODUCTION"
-    elif detection_metrics['overall_accuracy'] >= 70 and avg_rr < 50:
-        system_status = "SYSTEM NEEDS CALIBRATION"
-    else:
-        system_status = "SYSTEM REQUIRES MAJOR IMPROVEMENTS"
-
-    report_lines.append(f"System Status: {system_status}")
-    report_lines.append("")
-
-    # Critical Findings
-    report_lines.append("CRITICAL FINDINGS:")
-    report_lines.append("-" * 20)
-
-    # Check if good samples are being correctly identified
-    good_samples_correct = detection_df[(detection_df['Sample_Type'] == 'Good') & (detection_df['Correct_Detection'] == True)]
-    if len(good_samples_correct) < len(detection_df[detection_df['Sample_Type'] == 'Good']):
-        report_lines.append("⚠️  CRITICAL: Some good samples are being incorrectly rejected")
-
-    # Check if defective samples are being correctly identified
-    defective_samples_correct = detection_df[(detection_df['Sample_Type'] == 'Defective') & (detection_df['Correct_Detection'] == True)]
-    if len(defective_samples_correct) < len(detection_df[detection_df['Sample_Type'] == 'Defective']):
-        report_lines.append("⚠️  CRITICAL: Some defective samples are being incorrectly accepted")
-
-    if avg_rr > 30:
-        report_lines.append("⚠️  CRITICAL: High measurement system variation affects defect detection reliability")
-
-    if detection_metrics['overall_accuracy'] < 70:
-        report_lines.append("⚠️  CRITICAL: Poor defect detection accuracy - system not suitable for quality control")
-
-    report_lines.append("")
-
-    # Recommendations
-    report_lines.append("RECOMMENDATIONS:")
-    report_lines.append("-" * 15)
-
-    # Defect detection specific recommendations
-    if detection_metrics['sensitivity'] < 90:
-        report_lines.append("• Improve defect detection sensitivity - some defective parts may pass through")
-
-    if detection_metrics['specificity'] < 90:
-        report_lines.append("• Improve good part identification - may reject acceptable parts unnecessarily")
-
-    # R&R specific recommendations
-    for ctq in ctq_metrics:
-        if ctq not in gage_rr_stats:
-            continue
-        stats = gage_rr_stats[ctq]
-
-        if stats['measurement_system_percent'] > 30:
-            report_lines.append(f"• {ctq}: Poor measurement system - requires significant improvement")
-
-    # Operator training recommendations
-    if len(incorrect_detections) > 0:
-        report_lines.append("• Additional operator training required to improve detection consistency")
-
-    # System readiness recommendation
-    if system_status == "SYSTEM READY FOR PRODUCTION":
-        report_lines.append("• System validation successful - ready for production use")
-    elif system_status == "SYSTEM NEEDS CALIBRATION":
-        report_lines.append("• Recalibrate measurement system and retrain operators before production")
-    else:
-        report_lines.append("• Major system overhaul required - not suitable for production use")
-
-    report_lines.append("")
-    report_lines.append("=" * 80)
-
-    # Save report
-    report_text = "\n".join(report_lines)
-
-    os.makedirs("gage_rr_analysis", exist_ok=True)
-    with open("gage_rr_analysis/gage_rr_defect_detection_report.txt", "w") as f:
-        f.write(report_text)
-
-    print("\n" + report_text)
-
-    return report_text
+    print(f"   - defect_detection_performance.png")
+    print(f"   - main_ctq_data.csv (main 3 CTQs with Overall_Pass)")
+    print(f"   - all_ctq_data_with_thresholds.csv (all CTQs with individual thresholds, no Overall_Pass)")
+    print(f"\n📊 Dataset summary:")
+    print(f"   Main CTQ dataset: {len(combined_main_ctq_df)} rows, {len(combined_main_ctq_df.columns)} columns")
+    print(f"   All CTQ dataset: {len(combined_all_ctq_df)} rows, {len(combined_all_ctq_df.columns)} columns")
 
 if __name__ == "__main__":
     main()
