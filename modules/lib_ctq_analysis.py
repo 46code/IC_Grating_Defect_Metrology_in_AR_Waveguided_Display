@@ -246,7 +246,7 @@ class HyperspectralAnalyzer:
         sam_results = self.calculate_sam_metrics(sample_reflectance, reference_reflectance, roi_mask)
 
         if sam_results is None:
-            print("❌ SAM calculation failed")
+            print("ERROR: SAM calculation failed")
             return None
 
         # Calculate ring metrics using SAM map
@@ -265,5 +265,5 @@ class HyperspectralAnalyzer:
             'uniformity': uniformity_results
         }
 
-        print("✅ Hyperspectral analysis complete!")
+        print("SUCCESS: Hyperspectral analysis complete!")
         return results

@@ -29,7 +29,7 @@ class ImageRegistration:
         print("🔄 Computing homography matrix...")
 
         if len(source_points) != len(target_points) or len(source_points) < 4:
-            print(f"❌ Need at least 4 point pairs, got {len(source_points)}")
+            print(f"ERROR: Need at least 4 point pairs, got {len(source_points)}")
             return None
 
         # Convert to numpy arrays
@@ -44,7 +44,7 @@ class ImageRegistration:
         )
 
         if self.homography_matrix is None:
-            print("❌ Failed to compute homography")
+            print("ERROR: Failed to compute homography")
             return None
 
         # Calculate reprojection error
@@ -56,7 +56,7 @@ class ImageRegistration:
         errors = np.sqrt(np.sum((dst_pts - reprojected) ** 2, axis=1))
         self.registration_error = np.mean(errors)
 
-        print(f"✅ Homography computed")
+        print(f"SUCCESS: Homography computed")
         print(f"   Mean reprojection error: {self.registration_error:.2f} pixels")
         print(f"   Individual errors: {[f'{e:.2f}' for e in errors]}")
 
@@ -77,7 +77,7 @@ class ImageRegistration:
             homography_matrix = self.homography_matrix
 
         if homography_matrix is None:
-            print("❌ No homography matrix available")
+            print("ERROR: No homography matrix available")
             return None
 
         height, width = image.shape
@@ -110,7 +110,7 @@ class ImageRegistration:
             homography_matrix = self.homography_matrix
 
         if homography_matrix is None:
-            print("❌ No homography matrix available")
+            print("ERROR: No homography matrix available")
             return None
 
         height, width, num_bands = cube.shape
@@ -133,7 +133,7 @@ class ImageRegistration:
                 borderValue=0
             )
 
-        print("✅ Cube registration complete")
+        print("SUCCESS: Cube registration complete")
         return registered_cube
 
     def create_roi_mask(self, image_shape, circle_params):
@@ -147,7 +147,7 @@ class ImageRegistration:
         Returns:
             np.ndarray: Binary mask (uint8, 255=ROI, 0=background)
         """
-        print("🎯 Creating circular ROI mask...")
+        print("Detecting Creating circular ROI mask...")
 
         height, width = image_shape
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -163,7 +163,7 @@ class ImageRegistration:
         total_pixels = height * width
         coverage = (roi_pixels / total_pixels) * 100
 
-        print(f"✅ ROI mask created:")
+        print(f"SUCCESS: ROI mask created:")
         print(f"   Center: {center}, Radius: {radius}")
         print(f"   ROI pixels: {roi_pixels:,} ({coverage:.2f}% coverage)")
 

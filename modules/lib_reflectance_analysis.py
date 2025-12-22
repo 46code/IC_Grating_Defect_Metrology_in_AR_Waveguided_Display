@@ -30,7 +30,7 @@ class ReflectanceAnalyzer:
 
         # Ensure same shape
         if not (sample_cube.shape == white_cube.shape == dark_cube.shape):
-            print("❌ All cubes must have same shape")
+            print("ERROR: All cubes must have same shape")
             return None
 
         height, width, num_bands = sample_cube.shape
@@ -56,7 +56,7 @@ class ReflectanceAnalyzer:
 
             reflectance_cube[:, :, band_idx] = reflectance
 
-        print("✅ Reflectance computation complete")
+        print("SUCCESS: Reflectance computation complete")
         return reflectance_cube
 
     def extract_roi_spectrum(self, reflectance_cube, roi_mask):
@@ -70,14 +70,14 @@ class ReflectanceAnalyzer:
         Returns:
             dict: ROI analysis assets
         """
-        print("📊 Extracting ROI reflectance spectrum...")
+        print(" Extracting ROI reflectance spectrum...")
 
         # Get ROI coordinates
         roi_coords = np.where(roi_mask > 0)
         num_roi_pixels = len(roi_coords[0])
 
         if num_roi_pixels == 0:
-            print("❌ No ROI pixels found")
+            print("ERROR: No ROI pixels found")
             return None
 
         num_bands = reflectance_cube.shape[2]
@@ -113,7 +113,7 @@ class ReflectanceAnalyzer:
             }
         }
 
-        print(f"✅ ROI spectrum extracted:")
+        print(f"SUCCESS: ROI spectrum extracted:")
         print(f"   ROI pixels: {num_roi_pixels:,}")
         print(f"   Mean reflectance: {overall_mean:.4f}")
         print(f"   Std deviation: {overall_std:.4f}")
@@ -132,13 +132,13 @@ class ReflectanceAnalyzer:
         Returns:
             dict: Comparison analysis
         """
-        print("📊 Comparing reference vs sample ROI spectra...")
+        print(" Comparing reference vs sample ROI spectra...")
 
         ref_spectrum = reference_results['mean_spectrum']
         sample_spectrum = sample_results['mean_spectrum']
 
         if len(ref_spectrum) != len(sample_spectrum):
-            print("❌ Spectra have different lengths")
+            print("ERROR: Spectra have different lengths")
             return None
 
         # Compute differences
@@ -169,7 +169,7 @@ class ReflectanceAnalyzer:
             'sample_stats': sample_results['statistics']
         }
 
-        print(f"✅ Spectral comparison complete:")
+        print(f"SUCCESS: Spectral comparison complete:")
         print(f"   Mean difference: {mean_abs_diff:.4f}")
         print(f"   Relative change: {mean_rel_diff:+.2f}%")
         print(f"   Max difference at {max_diff_wavelength}nm: {max_abs_diff:.4f}")
@@ -274,13 +274,13 @@ class ReflectanceAnalyzer:
         Returns:
             np.ndarray: Normalized projection image (H x W)
         """
-        print(f"🎯 Creating projection from wavelength range {wl_range[0]}-{wl_range[1]}nm...")
+        print(f"Detecting Creating projection from wavelength range {wl_range[0]}-{wl_range[1]}nm...")
 
         # Create mask for wavelength range
         mask = (wavelengths >= wl_range[0]) & (wavelengths <= wl_range[1])
 
         if not np.any(mask):
-            print(f"❌ No wavelengths found in range {wl_range}")
+            print(f"ERROR: No wavelengths found in range {wl_range}")
             return None
 
         # Average over selected wavelengths
@@ -292,7 +292,7 @@ class ReflectanceAnalyzer:
         num_bands_used = np.sum(mask)
         wl_used = wavelengths[mask]
 
-        print(f"✅ Projection created using {num_bands_used} bands ({wl_used[0]:.0f}-{wl_used[-1]:.0f}nm)")
+        print(f"SUCCESS: Projection created using {num_bands_used} bands ({wl_used[0]:.0f}-{wl_used[-1]:.0f}nm)")
         print(f"   Projection range: {proj.min():.4f} - {proj.max():.4f} (raw)")
         print(f"   Normalized range: {proj_norm.min():.4f} - {proj_norm.max():.4f}")
 

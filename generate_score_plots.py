@@ -23,10 +23,10 @@ def load_config():
     try:
         with open(config_path, 'r') as f:
             config = json.load(f)
-        print(f"✅ Configuration loaded from: {config_path}")
+        print(f"SUCCESS: Configuration loaded from: {config_path}")
         return config
     except FileNotFoundError:
-        print(f"❌ Configuration file not found: {config_path}")
+        print(f"ERROR: Configuration file not found: {config_path}")
         print("   Please create config.json with required parameters.")
         return None
 
@@ -60,7 +60,7 @@ def collect_analysis_data(samples, results_dir_prefix):
     """Collect analysis data from processed samples"""
     batch_data = []
 
-    print(f"📊 Collecting data from {len(samples)} samples...")
+    print(f"SUMMARY: Collecting data from {len(samples)} samples...")
     
     # Auto-detect naming convention (Defect vs Sample) - case insensitive and typo tolerant
     sample_type = "Sample"
@@ -119,12 +119,12 @@ def collect_analysis_data(samples, results_dir_prefix):
                     'Uniformity_Score': uniformity_score
                 })
 
-                print(f"✅ Loaded {sample_name}: RMSE_Overall={rmse_overall:.6f}, SAM_P95={sam_p95:.2f}°, Uniformity={uniformity_score:.3f}")
+                print(f"SUCCESS: Loaded {sample_name}: RMSE_Overall={rmse_overall:.6f}, SAM_P95={sam_p95:.2f}°, Uniformity={uniformity_score:.3f}")
 
             except Exception as e:
-                print(f"⚠️  Error reading {sample_name}: {str(e)}")
+                print(f"WARNING:  Error reading {sample_name}: {str(e)}")
         else:
-            print(f"⚠️  Analysis summary not found for {sample_name}: {summary_file}")
+            print(f"WARNING:  Analysis summary not found for {sample_name}: {summary_file}")
 
     return batch_data
 
@@ -176,10 +176,10 @@ def extract_sample_number(sample_name, sample_type):
 def generate_scatter_plots(batch_data, output_dir, config):
     """Generate 3 scatter plots: RMSE, SAM_Mean, and Uniformity Score for all defects"""
     if len(batch_data) < 1:
-        print("⚠️  No data available to generate scatter plots")
+        print("WARNING:  No data available to generate scatter plots")
         return
 
-    print(f"\n📊 GENERATING SCATTER PLOTS FOR {len(batch_data)} DEFECTS")
+    print(f"\nSUMMARY: GENERATING SCATTER PLOTS FOR {len(batch_data)} DEFECTS")
     print("="*80)
 
     # Convert to DataFrame
@@ -286,7 +286,7 @@ def generate_scatter_plots(batch_data, output_dir, config):
         # Add statistics box with pass/fail info
         pass_count = np.sum(pass_threshold)
         fail_count = np.sum(failed_samples)
-        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\n✅ Passed: {pass_count}\n❌ Failed: {fail_count}'
+        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\nSUCCESS: Passed: {pass_count}\nERROR: Failed: {fail_count}'
         plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
                 fontsize=10, va='top', ha='left', fontweight='bold',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black'))
@@ -297,7 +297,7 @@ def generate_scatter_plots(batch_data, output_dir, config):
         plt.savefig(png_path, dpi=300, bbox_inches='tight')
         plt.close()
 
-        print(f"✅ Generated: {config['filename']} (✅ {pass_count} passed, ❌ {fail_count} failed)")
+        print(f"SUCCESS: Generated: {config['filename']} (SUCCESS: {pass_count} passed, ERROR: {fail_count} failed)")
 
     # Generate combined plot with all 3 metrics
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
@@ -356,7 +356,7 @@ def generate_scatter_plots(batch_data, output_dir, config):
     plt.savefig(combined_png, dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f"✅ Generated: Combined_Analysis_Scatter")
+    print(f"SUCCESS: Generated: Combined_Analysis_Scatter")
 
     # Save batch analysis summary
     batch_summary_df = pd.DataFrame(batch_data)
@@ -400,13 +400,13 @@ def generate_scatter_plots(batch_data, output_dir, config):
             })
 
     # Print results
-    print(f"📊 THRESHOLD CRITERIA:")
+    print(f"SUMMARY: THRESHOLD CRITERIA:")
     print(f"   • RMSE Overall < {threshold_config['RMSE_Overall']['value']}")
     print(f"   • SAM P95 < {threshold_config['SAM_P95']['value']} rad")
     print(f"   • Uniformity Score > {threshold_config['Uniformity_Score']['value']}")
 
     if all_pass_samples:
-        print(f"\n✅ SAMPLES PASSING ALL THRESHOLDS ({len(all_pass_samples)}/{len(df_batch)} samples):")
+        print(f"\nSUCCESS: SAMPLES PASSING ALL THRESHOLDS ({len(all_pass_samples)}/{len(df_batch)} samples):")
         print("-" * 80)
         print(f"{'Sample':<10} {'RMSE':<12} {'SAM P95 (rad)':<15} {'Uniformity':<12}")
         print("-" * 80)
@@ -419,10 +419,10 @@ def generate_scatter_plots(batch_data, output_dir, config):
         all_pass_df.to_csv(high_quality_path, index=False)
         print(f"\n💾 High-quality samples list saved to: {high_quality_path}")
     else:
-        print(f"\n❌ NO SAMPLES PASS ALL THRESHOLDS")
+        print(f"\nERROR: NO SAMPLES PASS ALL THRESHOLDS")
         print("   All samples fail at least one quality criterion.")
 
-    print(f"\n📊 SCATTER PLOT SUMMARY:")
+    print(f"\nSUMMARY: SCATTER PLOT SUMMARY:")
     print(f"   Generated 4 plots saved to: {output_dir}")
     print(f"   - RMSE_Overall_Scatter: RMSE analysis across all defects")
     print(f"   - SAM_P95_Scatter: SAM P95 analysis across all defects")
@@ -475,14 +475,14 @@ def get_selected_metrics_from_config(config):
     # Process each selected metric
     for ctq_type, metric_key in selected_metrics.items():
         if metric_key not in metric_info:
-            print(f"⚠️  Unknown metric '{metric_key}' for {ctq_type}. Skipping.")
+            print(f"WARNING:  Unknown metric '{metric_key}' for {ctq_type}. Skipping.")
             continue
 
         # Get threshold key mapping
         threshold_key = get_threshold_key_for_metric(metric_key)
 
         if not threshold_key or threshold_key not in quality_thresholds:
-            print(f"⚠️  No threshold found for '{metric_key}' (expected: {threshold_key}). Skipping.")
+            print(f"WARNING:  No threshold found for '{metric_key}' (expected: {threshold_key}). Skipping.")
             continue
 
         # Get metric info
@@ -522,7 +522,7 @@ def get_threshold_key_for_metric(metric_key):
 def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_configs):
     """Generate scatter plots for selected metrics with flexible configuration"""
     if len(batch_data) < 1:
-        print("⚠️  No data available to generate scatter plots")
+        print("WARNING:  No data available to generate scatter plots")
         return
 
     # Auto-detect sample type from data
@@ -534,7 +534,7 @@ def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_con
     dataset_identifier = extract_dataset_identifier(config)
     dataset_suffix = f" - {dataset_identifier}" if dataset_identifier else ""
 
-    print(f"\n📊 GENERATING SCATTER PLOTS FOR {len(batch_data)} {sample_type_plural.upper()}")
+    print(f"\nSUMMARY: GENERATING SCATTER PLOTS FOR {len(batch_data)} {sample_type_plural.upper()}")
     if dataset_identifier:
         print(f"   Dataset: {dataset_identifier}")
     print("="*80)
@@ -614,7 +614,7 @@ def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_con
         # Add statistics box with pass/fail info
         pass_count = np.sum(pass_threshold)
         fail_count = np.sum(failed_samples)
-        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\n✅ Passed: {pass_count}\n❌ Failed: {fail_count}'
+        stats_text = f'Mean: {mean_val:.4f}\nStd: {std_val:.4f}\nRange: {max_val-min_val:.4f}\nSUCCESS: Passed: {pass_count}\nERROR: Failed: {fail_count}'
         plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
                 fontsize=10, va='top', ha='left', fontweight='bold',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black'))
@@ -625,7 +625,7 @@ def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_con
         plt.savefig(png_path, dpi=300, bbox_inches='tight')
         plt.close()
 
-        print(f"✅ Generated: {plot_config['filename']} (✅ {pass_count} passed, ❌ {fail_count} failed)")
+        print(f"SUCCESS: Generated: {plot_config['filename']} (SUCCESS: {pass_count} passed, ERROR: {fail_count} failed)")
 
     # Generate combined plot if we have 3 or fewer metrics
     if len(selected_configs) <= 3:
@@ -693,14 +693,14 @@ def generate_flexible_scatter_plots(batch_data, output_dir, config, selected_con
         plt.savefig(combined_png, dpi=300, bbox_inches='tight')
         plt.close()
 
-        print(f"✅ Generated: Combined_Analysis_Scatter")
+        print(f"SUCCESS: Generated: Combined_Analysis_Scatter")
 
     # Save batch analysis summary
     batch_summary_df = pd.DataFrame(batch_data)
     batch_summary_path = os.path.join(output_dir, "batch_analysis_summary.csv")
     batch_summary_df.to_csv(batch_summary_path, index=False)
 
-    print(f"\n📊 SCATTER PLOT SUMMARY:")
+    print(f"\nSUMMARY: SCATTER PLOT SUMMARY:")
     print(f"   Generated {len(selected_configs)} individual plots + 1 combined plot saved to: {output_dir}")
     for plot_config in selected_configs:
         dynamic_description = plot_config['ylabel'] + f" analysis across {sample_type_plural.lower()}"
@@ -853,7 +853,7 @@ def generate_final_summary_table(batch_data, ctq_results, config, output_dir):
         for ctq_type in selected_metrics.keys():
             if sample_name in ctq_results and ctq_type in ctq_results[sample_name]['evaluations']:
                 passes = ctq_results[sample_name]['evaluations'][ctq_type]['pass']
-                row.append("✅" if passes else "❌")
+                row.append("SUCCESS:" if passes else "ERROR:")
             else:
                 row.append("N/A")
 
@@ -882,10 +882,10 @@ def generate_final_summary_table(batch_data, ctq_results, config, output_dir):
     failed_samples = total_samples - passed_samples
 
     print(f"\n{'='*120}")
-    print("📊 SUMMARY STATISTICS:")
+    print("SUMMARY: SUMMARY STATISTICS:")
     print(f"   Total Samples: {total_samples}")
-    print(f"   ✅ Passed All CTQs: {passed_samples} ({passed_samples/total_samples*100:.1f}%)")
-    print(f"   ❌ Failed At Least One CTQ: {failed_samples} ({failed_samples/total_samples*100:.1f}%)")
+    print(f"   SUCCESS: Passed All CTQs: {passed_samples} ({passed_samples/total_samples*100:.1f}%)")
+    print(f"   ERROR: Failed At Least One CTQ: {failed_samples} ({failed_samples/total_samples*100:.1f}%)")
 
     # Show thresholds used
     print(f"\n📋 CTQ THRESHOLDS USED:")
@@ -905,7 +905,7 @@ def generate_final_summary_table(batch_data, ctq_results, config, output_dir):
 
 def main():
     """Main function to generate scatter plots and final summary"""
-    print("📊 Hyperspectral Analysis Score Plot Generator")
+    print("SUMMARY: Hyperspectral Analysis Score Plot Generator")
     print("="*80)
 
     # Load configuration
@@ -916,10 +916,10 @@ def main():
     # Validate configuration
     is_valid, message = validate_plotting_configuration(config)
     if not is_valid:
-        print(f"❌ Configuration validation failed: {message}")
+        print(f"ERROR: Configuration validation failed: {message}")
         return
     elif message != "Configuration is valid":
-        print(f"⚠️  {message}")
+        print(f"WARNING:  {message}")
 
     # Extract parameters from config
     samples = config['data_paths']['samples']
@@ -930,28 +930,28 @@ def main():
 
     if dataset_identifier:
         output_dir = os.path.join(results_dir_prefix, "scatter_plots")
-        print(f"📁 Dataset identified: {dataset_identifier}")
+        print(f"RESULTS: Dataset identified: {dataset_identifier}")
     else:
         output_dir = os.path.join(results_dir_prefix, "scatter_plots")
-        print(f"📁 No dataset identifier found, using default output directory")
+        print(f"RESULTS: No dataset identifier found, using default output directory")
 
-    print(f"📁 Output directory: {output_dir}")
+    print(f"RESULTS: Output directory: {output_dir}")
 
     # Collect analysis data from processed samples
     batch_data = collect_analysis_data(samples, results_dir_prefix)
 
     if not batch_data:
-        print("❌ No analysis data found. Please run the main analysis first.")
+        print("ERROR: No analysis data found. Please run the main analysis first.")
         return
 
     # Get selected metrics from config
     selected_configs = get_selected_metrics_from_config(config)
 
     if not selected_configs:
-        print("❌ No valid metrics selected for plotting.")
+        print("ERROR: No valid metrics selected for plotting.")
         return
 
-    print(f"📊 Selected {len(selected_configs)} metrics for plotting:")
+    print(f"SUMMARY: Selected {len(selected_configs)} metrics for plotting:")
     for plot_config in selected_configs:
         print(f"   - {plot_config['ctq_type']}: {plot_config['ylabel']}")
 
@@ -964,7 +964,7 @@ def main():
     # Generate and display final summary table
     summary_df = generate_final_summary_table(batch_data, ctq_results, config, output_dir)
 
-    print(f"\n✅ Analysis complete! All outputs saved to: {output_path}")
+    print(f"\nSUCCESS: Analysis complete! All outputs saved to: {output_path}")
 
 if __name__ == "__main__":
     main()

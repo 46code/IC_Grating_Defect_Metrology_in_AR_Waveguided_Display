@@ -40,7 +40,7 @@ class FeatureDetector:
             tuple: (fiducials, binary_map) where fiducials is list of (x, y) coordinates
                    and binary_map is the thresholded binary image used for detection
         """
-        print(f"🎯 Detecting {num_fiducials} fiducials...")
+        print(f"Detecting Detecting {num_fiducials} fiducials...")
 
         # EXACT PARAMETERS FROM ORIGINAL PIPELINE:
         # Normalize and blur (using Gaussian, not bilateral)
@@ -55,16 +55,16 @@ class FeatureDetector:
         print(f"   Found {len(candidates)} initial candidates")
 
         if not candidates:
-            print(f"   ❌ No candidates found")
+            print(f"   ERROR: No candidates found")
             return [], binary
 
         # Select best 4 fiducials using exact original method
         selected = self._select_best_fiducials(candidates, image.shape)
 
         if selected:
-            print(f"   ✅ Selected {len(selected)} fiducials")
+            print(f"   SUCCESS: Selected {len(selected)} fiducials")
         else:
-            print(f"   ❌ No fiducials selected")
+            print(f"   ERROR: No fiducials selected")
 
         return selected, binary
 
@@ -254,7 +254,7 @@ class FeatureDetector:
         Returns:
             dict: Circle parameters {'center': (x, y), 'radius': r, 'score': s}
         """
-        print("🎯 Detecting circular features...")
+        print("Detecting Detecting circular features...")
 
         # Crop if specified
         if crop_region:
@@ -288,11 +288,11 @@ class FeatureDetector:
         )
 
         if circles is None:
-            print("❌ No circles detected")
+            print("ERROR: No circles detected")
             return None
 
         circles = np.round(circles[0, :]).astype("int")
-        print(f"✅ Found {len(circles)} circle candidates")
+        print(f"SUCCESS: Found {len(circles)} circle candidates")
 
         # Score circles and select best one
         best_circle = None
@@ -309,20 +309,20 @@ class FeatureDetector:
 
             if score >= self.circle_params['circle_threshold'] and score > best_score:
                 # Adjust coordinates back to original image
-                global_x = x + offset[0] + 4 # small horizontal adjustment
-                global_y = y + offset[1] + 2 # small vertical adjustment
+                global_x = x + offset[0] # small horizontal adjustment
+                global_y = y + offset[1] + 3 # small vertical adjustment
                 best_circle = {
                     'center': (global_x, global_y),
-                    'radius': radius,
+                    'radius': radius - 3,
                     'score': score
                 }
                 best_score = score
 
         if best_circle:
-            print(f"✅ Best circle: center {best_circle['center']}, radius {best_circle['radius']}")
+            print(f"SUCCESS: Best circle: center {best_circle['center']}, radius {best_circle['radius']}")
             return best_circle
         else:
-            print("❌ No valid circles found")
+            print("ERROR: No valid circles found")
             return None
 
     def _score_circle(self, image, cx, cy, radius):

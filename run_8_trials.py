@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-Simple Gage R&R Trial Runner
-Runs 6 trials through main.py with different percentile_threshold values
+Gage R&R Trial Runner
+Runs trials through main.py with different operators and percentile_threshold values
 
 Author: Khang Tran
-Date: November 2025
+Date: December 2025
 """
 
 import json
 import subprocess
-import os
+import sys
 
-# List of operators to process (6 trials)
+# Configure stdout encoding for Windows compatibility
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+
+# Operators to process
 OPERATORS = [
     "KhangT1",
     "KhangT2",
@@ -27,6 +34,55 @@ OPERATORS = [
 PERCENTILE_THRESHOLDS = [3.4, 3.8, 4, 3.3, 3.45, 4, 4, 3.9]
 # 450 - 800: 3.5, 3.8, 4.2, 3.5, 3.4, 3.93, 4.5, 3.9
 # 450 - 950: 3.4, 3.8, 4, 3.3, 3.45, 4, 4, 3.9
+
+def extract_failure_summary(stdout_text):
+    """Extract detailed failure information from main.py output"""
+    if not stdout_text:
+        return []
+
+    failure_info = []
+    lines = stdout_text.split('\n')
+    failed_samples = set()
+
+    for line in lines:
+        line = line.strip()
+
+        # Capture specific failure reasons with sample names
+        if "FAILURE_REASON:" in line:
+            reason = line.split("FAILURE_REASON:", 1)[1].strip()
+            failure_info.append(f"REASON: {reason}")
+
+            # Extract sample name from failure reason
+            if " for " in reason:
+                parts = reason.split(" for ")
+                if len(parts) > 1:
+                    sample_part = parts[1].split(" ")[0]  # Get first word after "for"
+                    if sample_part.startswith("Sample"):
+                        failed_samples.add(sample_part)
+
+        # Capture sample processing failures
+        elif "FAILURE_DETECTED:" in line:
+            sample_info = line.replace("FAILURE_DETECTED:", "").strip()
+            # Extract sample name more carefully
+            words = sample_info.split()
+            for word in words:
+                if word.startswith("Sample") and len(word) > 6:  # Sample + number
+                    failed_samples.add(word)
+
+        # Capture error exceptions
+        elif "ERROR_DETECTED:" in line:
+            sample_info = line.replace("ERROR_DETECTED:", "").strip()
+            # Extract sample name more carefully
+            words = sample_info.split()
+            for word in words:
+                if word.startswith("Sample") and len(word) > 6:  # Sample + number
+                    failed_samples.add(word)
+
+    # Add summary of failed samples count if any specific samples were detected
+    if failed_samples:
+        failure_info.append(f"Failed samples: {', '.join(sorted(failed_samples))}")
+
+    return failure_info
 
 def update_config_for_trial(operator, percentile_threshold):
     """Update config.json for the current trial"""
@@ -48,62 +104,78 @@ def update_config_for_trial(operator, percentile_threshold):
     with open('config.json', 'w') as f:
         json.dump(config, f, indent=2)
 
-    print(f"✅ Updated config for {operator} (threshold: {percentile_threshold})")
+    print(f"Config updated: {operator} (threshold: {percentile_threshold})")
 
 def run_trial(trial_num, operator, percentile_threshold):
-    """Run a single trial"""
-    print(f"\n{'='*60}")
-    print(f"🚀 TRIAL {trial_num}/8: {operator}")
-    print(f"   Percentile Threshold: {percentile_threshold}")
-    print(f"{'='*60}")
+    """Run a single trial with the specified operator and threshold"""
+    total_trials = len(OPERATORS)
+    print(f"\nTrial {trial_num}/{total_trials}: {operator} (threshold: {percentile_threshold})")
+    print("-" * 50)
 
     try:
         # Update config for this trial
         update_config_for_trial(operator, percentile_threshold)
 
         # Run main.py
-        print("   Running main.py...")
-        result = subprocess.run(['python3', 'main.py'],
+        print("Running analysis...")
+        result = subprocess.run([sys.executable, 'main.py'],
                               capture_output=True, text=True, timeout=1800)
 
-        if result.returncode == 0:
-            print(f"✅ Main analysis completed successfully for Trial {trial_num}")
+
+        # Extract detailed failure information
+        failure_summary = extract_failure_summary(result.stdout)
+        failed_samples_detected = len(failure_summary) > 0
+
+        if failed_samples_detected:
+            print("Sample failures detected:")
+            for failure in failure_summary:
+                print(f"  {failure}")
+
+        if result.returncode == 0 and not failed_samples_detected:
+            print("Analysis completed successfully")
 
             # Run generate_score_plots.py after successful main analysis
-            print("   Running generate_score_plots.py...")
-            plot_result = subprocess.run(['python3', 'generate_score_plots.py'],
+            print("Running generate_score_plots.py...")
+            plot_result = subprocess.run([sys.executable, 'generate_score_plots.py'],
                                        capture_output=True, text=True, timeout=300)  # 5 min timeout for plots
 
             if plot_result.returncode == 0:
-                print(f"✅ Score plots generated successfully for Trial {trial_num}")
+                print("Score plots generated successfully")
                 return True
             else:
-                print(f"⚠️  Score plots failed for Trial {trial_num}, but main analysis succeeded")
-                print(f"   Plot error: {plot_result.stderr[-300:] if plot_result.stderr else 'No error details'}")
+                print("Score plots failed, but main analysis succeeded")
+                print(f"Plot error: {plot_result.stderr[-300:] if plot_result.stderr else 'No error details'}")
                 # Still consider this a success since main analysis worked
                 return True
 
         else:
-            print(f"❌ Trial {trial_num} failed!")
-            print(f"   Error: {result.stderr[-500:]}")  # Last 500 chars of error
+            if failed_samples_detected:
+                print("Trial failed due to sample failures")
+            else:
+                print("Trial failed")
+
+            if result.stderr:
+                print(f"Error: {result.stderr[-500:]}")  # Last 500 chars of error
             return False
 
     except subprocess.TimeoutExpired:
-        print(f"❌ Trial {trial_num} timed out (30 minutes)")
+        print("Trial timed out (30 minutes)")
         return False
     except Exception as e:
-        print(f"❌ Trial {trial_num} error: {str(e)}")
+        print(f"Trial error: {str(e)}")
         return False
 
 def main():
-    """Run all 8 trials"""
-    print("🔬 Gage R&R - 8 Trial Runner")
-    print("=" * 60)
+    """Run all trials for the configured operators"""
+    total_trials = len(OPERATORS)
+
+    print("Gage R&R Trial Runner")
+    print("-" * 30)
     print("Operators:")
     for i, op in enumerate(OPERATORS, 1):
-        print(f"   {i}. {op} (threshold: {PERCENTILE_THRESHOLDS[i-1]})")
+        print(f"  {i}. {op} (threshold: {PERCENTILE_THRESHOLDS[i-1]})")
     print("Reference: KhangT2 (fixed)")
-    print("=" * 60)
+    print("-" * 30)
 
     successful_trials = 0
     failed_trials = []
@@ -118,23 +190,23 @@ def main():
             failed_trials.append(f"Trial {i} ({operator})")
 
     # Final summary
-    print(f"\n{'='*60}")
-    print("🎯 FINAL RESULTS")
-    print(f"{'='*60}")
-    print(f"✅ Successful trials: {successful_trials}/8")
+    print(f"\nRESULTS")
+    print("-" * 30)
+    print(f"Successful trials: {successful_trials}/{total_trials}")
 
     if failed_trials:
-        print(f"❌ Failed trials: {len(failed_trials)}")
+        print(f"Failed trials: {len(failed_trials)}")
         for trial in failed_trials:
-            print(f"   - {trial}")
+            print(f"  - {trial}")
 
-    if successful_trials == 8:
-        print("\n🎉 All trials completed successfully!")
+    if successful_trials == total_trials:
+        print("\nAll trials completed successfully!")
     else:
-        print(f"\n⚠️  {6-successful_trials} trials failed")
+        failed_count = total_trials - successful_trials
+        print(f"\n{failed_count} trial(s) failed")
 
-    print(f"📊 Results saved in results/ directories")
-    print("=" * 60)
+    print(f"Results saved in results/ directories")
+    print("-" * 30)
 
 if __name__ == "__main__":
     main()

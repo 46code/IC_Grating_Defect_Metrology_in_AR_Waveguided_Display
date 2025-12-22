@@ -69,23 +69,23 @@ class SpectralDataLoader:
             dataset_path = self.sample_dark_path
         elif dataset_name == 'sample':
             if sample_name is None:
-                print(f"❌ Sample name required for sample dataset")
+                print(f"ERROR: Sample name required for sample dataset")
                 return None
             dataset_path = self.sample_path / sample_name
         else:
-            print(f"❌ Unknown dataset type: {dataset_name}")
+            print(f"ERROR: Unknown dataset type: {dataset_name}")
             return None
 
         if not dataset_path.exists():
-            print(f"❌ Dataset path not found: {dataset_path}")
+            print(f"ERROR: Dataset path not found: {dataset_path}")
             return None
 
-        print(f"📁 Loading {dataset_name} spectral cube from {dataset_path}...")
+        print(f"Loading Loading {dataset_name} spectral cube from {dataset_path}...")
 
         # Get list of TIFF files
         tiff_files = sorted(list(dataset_path.glob("*.tif")))
         if not tiff_files:
-            print(f"❌ No TIFF files found in {dataset_path}")
+            print(f"ERROR: No TIFF files found in {dataset_path}")
             return None
 
         # Load first image to get dimensions
@@ -100,7 +100,7 @@ class SpectralDataLoader:
         for i, tiff_file in enumerate(tiff_files):
             cube[:, :, i] = tifffile.imread(tiff_file)
 
-        print(f"✅ Loaded {dataset_name}: {cube.shape}")
+        print(f"SUCCESS: Loaded {dataset_name}: {cube.shape}")
         return cube
 
     def get_wavelength_band(self, cube, wavelength_nm):
@@ -115,12 +115,12 @@ class SpectralDataLoader:
             tuple: (band_image, band_index)
         """
         if wavelength_nm not in self.wavelengths:
-            print(f"❌ Wavelength {wavelength_nm}nm not available")
+            print(f"ERROR: Wavelength {wavelength_nm}nm not available")
             return None, None
 
         band_idx = self.wavelengths.index(wavelength_nm)
         if band_idx >= cube.shape[2]:
-            print(f"❌ Band index {band_idx} out of range")
+            print(f"ERROR: Band index {band_idx} out of range")
             return None, None
 
         return cube[:, :, band_idx], band_idx
@@ -132,17 +132,17 @@ class SpectralDataLoader:
         Returns:
             tuple: (reference_white_cube, reference_dark_cube)
         """
-        print(f"📁 Loading reference calibration data...")
+        print(f"Loading Loading reference calibration data...")
 
         # Load reference white data
         if not self.reference_white_path.exists():
-            print(f"❌ Reference white path not found: {self.reference_white_path}")
+            print(f"ERROR: Reference white path not found: {self.reference_white_path}")
             return None, None
 
-        print(f"📁 Loading reference white cube from {self.reference_white_path}...")
+        print(f"Loading Loading reference white cube from {self.reference_white_path}...")
         tiff_files = sorted(list(self.reference_white_path.glob("*.tif")))
         if not tiff_files:
-            print(f"❌ No TIFF files found in {self.reference_white_path}")
+            print(f"ERROR: No TIFF files found in {self.reference_white_path}")
             return None, None
 
         # Load reference white cube
@@ -153,23 +153,23 @@ class SpectralDataLoader:
         reference_white_cube = np.zeros((height, width, num_bands), dtype=first_img.dtype)
         for i, tiff_file in enumerate(tiff_files):
             reference_white_cube[:, :, i] = tifffile.imread(tiff_file)
-        print(f"✅ Loaded reference white: {reference_white_cube.shape}")
+        print(f"SUCCESS: Loaded reference white: {reference_white_cube.shape}")
 
         # Load reference Dark data
         if not self.reference_dark_path.exists():
-            print(f"❌ Reference Dark path not found: {self.reference_dark_path}")
+            print(f"ERROR: Reference Dark path not found: {self.reference_dark_path}")
             return None, None
 
-        print(f"📁 Loading reference Dark cube from {self.reference_dark_path}...")
+        print(f"Loading Loading reference Dark cube from {self.reference_dark_path}...")
         tiff_files = sorted(list(self.reference_dark_path.glob("*.tif")))
         if not tiff_files:
-            print(f"❌ No TIFF files found in {self.reference_dark_path}")
+            print(f"ERROR: No TIFF files found in {self.reference_dark_path}")
             return None, None
 
         reference_dark_cube = np.zeros((height, width, num_bands), dtype=first_img.dtype)
         for i, tiff_file in enumerate(tiff_files):
             reference_dark_cube[:, :, i] = tifffile.imread(tiff_file)
-        print(f"✅ Loaded reference Dark: {reference_dark_cube.shape}")
+        print(f"SUCCESS: Loaded reference Dark: {reference_dark_cube.shape}")
 
         return reference_white_cube, reference_dark_cube
 
@@ -200,9 +200,9 @@ class SpectralDataLoader:
                 cube = self.load_cube(dataset_type)
 
             if cube is None:
-                print(f"❌ Failed to load {dataset_type}")
+                print(f"ERROR: Failed to load {dataset_type}")
                 return None
             datasets[dataset_key] = cube
 
-        print(f"✅ All datasets loaded successfully")
+        print(f"SUCCESS: All datasets loaded successfully")
         return datasets
