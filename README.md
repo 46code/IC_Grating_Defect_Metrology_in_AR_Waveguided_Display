@@ -4,6 +4,42 @@ Hyperspectral analysis pipeline for detecting and quantifying defects in wavegui
 
 ---
 
+## Project Structure
+
+```
+IC_Grating_Defect_Metrology_in_AR_Waveguided_Display/
+├── main.py                          # Main analysis pipeline
+├── generate_score_plots.py          # Pass/fail visualization generator
+├── run_8_trials.py                  # Automated 8-operator runner
+├── analysis_8_trials.py             # Comprehensive Gage R&R analysis
+├── config.json                      # Configuration file (paths, thresholds, parameters)
+├── requirements.txt                 # Python dependencies
+├── README.md                        # This file
+├── modules/                         # Reusable library modules
+│   ├── lib_gage_rr.py              # Gage R&R analysis functions
+│   ├── lib_spectral_loader.py      # Hyperspectral data loading
+│   ├── lib_reflectance_analysis.py # Reflectance computation
+│   ├── lib_feature_detection.py    # Fiducial & circle detection
+│   ├── lib_image_registration.py   # Image alignment
+│   ├── lib_ctq_analysis.py         # Quality metrics calculation
+│   └── lib_plotting.py             # Visualization utilities
+├── results/                         # Per-operator analysis results
+│   └── <operator>/                 # e.g., KhangT1, LuelT2
+│       ├── analysis_<sample>/      # Per-sample results
+│       └── scatter_plots/          # Pass/fail visualizations
+└── analysis_results/                # Comprehensive Gage R&R output (organized)
+    ├── README.md                   # Output directory documentation
+    ├── data/                       # CSV data files
+    ├── reports/                    # Text summaries
+    └── plots/                      # All visualizations
+        ├── gage_rr_dashboards/     # Professional summary dashboards
+        ├── diagnostics/            # Diagnostic plots
+        ├── distinct_categories/    # Sample discrimination analysis
+        └── sample_analysis/        # Sample performance plots
+```
+
+---
+
 ## 1. Setup
 
 ### Environment and Libraries
@@ -95,8 +131,19 @@ The `config.json` file controls all analysis parameters. Key sections:
   "rmse_per_pixel_p95_max": 0.08,     // Max RMSE (95th percentile)
   "sam_mean_max": 2.6,                 // Max spectral angle (radians)
   "uniformity_score_min": 0.6,        // Min uniformity score
+  "rmse_overall_max": 0.08,           // Max overall RMSE
+  "rmse_per_pixel_mean_max": 0.06,   // Max mean RMSE per pixel
+  "rmse_per_pixel_median_max": 0.09,  // Max median RMSE per pixel
+  "sam_median_max": 3.0,              // Max median SAM
+  "sam_p95_max": 5.2                  // Max 95th percentile SAM
 }
 ```
+
+**Important:** Quality thresholds are now **dynamically loaded** from `config.json`. 
+- Modify thresholds in `config.json` without touching code
+- Changes take effect immediately on next analysis run
+- All visualizations automatically use updated thresholds
+- Both `analysis_8_trials.py` and plotting functions read from config
 
 **Key Parameters Explained:**
 - **`percentile_threshold`**: Controls fiducial marker detection sensitivity. Lower values (2-3) detect more features, higher values (4-5) are more selective. Adjust if fiducial detection fails.
@@ -147,12 +194,28 @@ Operators:
 python analysis_8_trials.py
 ```
 
-This generates a Gage R&R report in `gage_rr_analysis/` with:
-- Combined CTQ data across all operators
-- Defect detection performance metrics
-- Pass/fail rates by operator
-- Statistical analysis (repeatability, reproducibility)
-- Comparative visualizations
+**New Features (Dec 2025):**
+- ✅ **Dynamic threshold loading** - Quality thresholds read directly from `config.json`
+- ✅ **Organized output structure** - Results grouped by type (data, reports, plots)
+- ✅ **Professional dashboards** - Multi-panel Gage R&R summary visualizations
+- ✅ **Advanced diagnostics** - Three-panel diagnostic plots with statistical analysis
+- ✅ **Sample discrimination** - NDC (Number of Distinct Categories) analysis
+- ✅ **Modular architecture** - Core functions moved to `lib_gage_rr.py` for reusability
+
+**Output:** Creates organized `analysis_results/` directory with:
+- Data files (CSV with all CTQ metrics)
+- Reports (comprehensive text summaries)
+- Plots organized by category:
+  - Gage R&R dashboards (3 professional summary panels)
+  - Diagnostics (3 three-panel diagnostic plots)
+  - Distinct categories (3 sample discrimination analyses)
+  - Sample analysis (9 sample-level performance plots)
+
+**Statistics Provided:**
+- Measurement system capability (repeatability, reproducibility)
+- Defect detection performance (signal-to-noise ratios)
+- Sample discrimination (NDC calculation)
+- Pass/fail rates by operator and sample
 
 ---
 
@@ -242,63 +305,7 @@ results/<operator>/scatter_plots/
 
 ---
 
-## 4. Metrics
-
-All metrics are computed **only within the IC ROI** after registration and reflectance calibration.
-
-### RMSE (Root Mean Square Error)
-```
-RMSE = sqrt(mean((R_ref - R_sample)²))  over all ROI pixels and wavelength bands
-```
-- **Range**: 0 → ∞ (typically 0-0.2 for reflectance)
-- **Meaning**: Global spectral difference magnitude
-- **Interpretation**: Lower = closer match to reference
-- **Threshold**: Typically < 0.08 for passing samples
-
-### SAM (Spectral Angle Mapper)
-Per pixel:
-```
-SAM(pixel) = arccos((r · s) / (||r|| × ||s||))
-where r = reference spectrum, s = sample spectrum
-```
-- **Range**: 0 → π radians (0 → 180°)
-- **Meaning**: Angular difference between spectral vectors
-- **Interpretation**: 
-  - SAM = 0: Identical spectral shape
-  - Lower angle = better spectral similarity (shape and proportions)
-- **Threshold**: Typically mean < 2.6 radians for passing samples
-
-### Ring Delta (Radial Uniformity)
-```
-inner_mean = mean(SAM within inner 20% of radius)
-outer_mean = mean(SAM within outer 80% of radius)
-Ring Delta = |outer_mean - inner_mean|
-```
-- **Range**: 0 → π radians
-- **Meaning**: Spectral consistency from center to edge
-- **Interpretation**: Near zero = uniform radial behavior (no center-edge variation)
-
-### Uniformity Score
-1. Divide ROI into 8 angular sectors (45° each)
-2. Compute median SAM per sector
-3. Calculate robust coefficient of variation (rCV) and relative range (RR)
-4. Normalize and blend: `U = 1 - (0.6 × rCVn + 0.4 × RRn)`
-
-- **Range**: 0-1
-- **Meaning**: Angular uniformity of spectral response
-- **Interpretation**:
-  - 1.0 = Perfect uniformity across all sectors
-  - < 0.6 = Significant angular variation (likely defect)
-- **Threshold**: Typically > 0.6 for passing samples
-
-### Additional Metrics
-- **RMSE Per Pixel P95**: 95th percentile of per-pixel RMSE (captures worst-case regions)
-- **SAM Median**: Median spectral angle (robust to outliers)
-- **SAM P95**: 95th percentile of SAM (identifies problematic regions)
-
----
-
-## 5. Outputs
+## 4. Outputs
 
 ### Per-Sample Analysis Results
 
@@ -326,28 +333,72 @@ Pass_RMSE,Pass_SAM,Pass_Uniformity,Overall_Pass
 - Color-coded by quality status
 - Threshold lines clearly marked
 
-### Gage R&R Analysis Results
+### Gage R&R Analysis Results (Updated Structure)
 
-**`gage_rr_analysis/`** folder contains:
+Running `analysis_8_trials.py` creates an organized `analysis_results/` directory:
 
-**Data Files:**
-- `combined_ctq_data.csv` - All CTQ metrics from all 8 operators
-- `gage_rr_defect_detection_report.txt` - Statistical summary and validation results
+```
+analysis_results/
+├── README.md                           # Complete documentation
+├── data/                               # CSV data files
+│   └── all_ctq_data_with_thresholds.csv
+├── reports/                            # Text reports
+│   └── comprehensive_analysis_summary.txt
+└── plots/                              # All visualizations (21 files)
+    ├── gage_rr_dashboards/             # Professional dashboards (3 files)
+    │   ├── RMSE_Per_Pixel_P95_gage_rr_summary_dashboard.png
+    │   ├── SAM_Mean_gage_rr_summary_dashboard.png
+    │   └── Uniformity_Score_gage_rr_summary_dashboard.png
+    ├── diagnostics/                    # Diagnostic plots (3 files)
+    │   ├── RMSE_Per_Pixel_P95_gage_rr_analysis.png
+    │   ├── SAM_Mean_gage_rr_analysis.png
+    │   └── Uniformity_Score_gage_rr_analysis.png
+    ├── distinct_categories/            # Sample discrimination (3 files)
+    │   ├── RMSE_Per_Pixel_P95_distinct_categories_analysis.png
+    │   ├── SAM_Mean_distinct_categories_analysis.png
+    │   └── Uniformity_Score_distinct_categories_analysis.png
+    └── sample_analysis/                # Sample performance (9 files)
+        ├── ctq_boxplots_by_operator.png
+        ├── rmse_overall_by_samples.png
+        ├── rmse_per_pixel_mean_by_samples.png
+        └── ... (other CTQ metrics)
+```
 
-**Visualizations:**
-- `ctq_boxplots_by_operator.png` - Distribution of metrics per operator
-- `defect_detection_performance.png` - Pass/fail rates across samples
-- `pass_fail_rates_by_operator.png` - Operator consistency analysis
-- `person_trial_comparison.png` - Repeatability check (Trial 1 vs Trial 2)
-- `rmse_per_pixel_p95_by_samples.png` - Sample-by-sample RMSE comparison
-- `sam_mean_by_samples.png` - Sample-by-sample SAM comparison
-- `uniformity_score_by_samples.png` - Sample-by-sample uniformity comparison
-- `sample_pass_fail_analysis.png` - Comprehensive pass/fail matrix
+**Key Features:**
 
-**Interpretation:**
-- **Repeatability**: How consistent is each person across their 2 trials?
-- **Reproducibility**: How consistent are different people?
-- **Defect Detection**: Does the system correctly identify defective samples?
+**1. Gage R&R Dashboards** - Professional multi-panel summaries with:
+- Input summary & ANOVA tables
+- Variance component breakdown
+- Color-coded assessment zones (green/yellow/red)
+- Sample × Operator interaction plots
+
+**2. Diagnostic Plots** - Three-panel analysis showing:
+- Box plots by operator with jittered points
+- Sample means line plot
+- Run chart with ±2σ control limits
+
+**3. Distinct Categories Analysis** - Sample discrimination capability:
+- NDC (Number of Distinct Categories) calculation
+- Color-coded category visualization
+- Assessment: Excellent (NDC≥5), Adequate (3-5), Poor (<3)
+
+**4. Sample Analysis** - Detailed performance tracking:
+- CTQ box plots by operator
+- Individual metric scatter plots by sample
+- Threshold lines for pass/fail assessment
+
+**Analysis Metrics:**
+- **Repeatability**: Consistency within each person across 2 trials
+- **Reproducibility**: Consistency between different people
+- **Measurement System %**: Total variation due to measurement system (target: <10% excellent, <30% acceptable)
+- **Defect Detection**: Signal-to-noise ratio for distinguishing good vs defective samples
+
+**Quality Thresholds** (loaded from `config.json`):
+- RMSE Per Pixel P95: ≤ 0.08
+- SAM Mean: ≤ 2.6 radians
+- Uniformity Score: ≥ 0.6
+
+*Note: Thresholds are dynamically loaded from config.json and can be adjusted without code changes.*
 
 ---
 
@@ -371,6 +422,62 @@ Pass_RMSE,Pass_SAM,Pass_Uniformity,Overall_Pass
 **"Samples have slight name variations (sample01 vs Sample01)"**
 - The code is designed to handle common variations
 - If issues persist, ensure exact name matching between folders and config
+
+**"Want to change quality thresholds"**
+- Edit `config.json` under `quality_thresholds` section
+- No code changes needed - thresholds are loaded dynamically
+- Changes apply to all analysis and visualization functions
+- Example: To make SAM threshold stricter, change `"sam_mean_max": 2.6` to `"sam_mean_max": 2.0`
+
+**"Need to find specific analysis results"**
+- Results are organized in `analysis_results/` by type:
+  - **Data**: `analysis_results/data/` (CSV files)
+  - **Reports**: `analysis_results/reports/` (text summaries)
+  - **Dashboards**: `analysis_results/plots/gage_rr_dashboards/`
+  - **Diagnostics**: `analysis_results/plots/diagnostics/`
+  - **Sample plots**: `analysis_results/plots/sample_analysis/`
+- See `analysis_results/README.md` for complete directory documentation
+
+---
+
+## Recent Updates (December 2025)
+
+### Version 2.0 - Enhanced Analysis & Organization
+
+**Major Improvements:**
+1. **Dynamic Configuration**
+   - Quality thresholds loaded from `config.json`
+   - No code changes needed to adjust pass/fail criteria
+   - Automatic propagation to all analysis functions
+
+2. **Organized Output Structure**
+   - Hierarchical directory organization
+   - Results grouped by type (data, reports, plots)
+   - Subdirectories for different plot categories
+   - Comprehensive README in output directory
+
+3. **Advanced Gage R&R Visualizations**
+   - Professional multi-panel summary dashboards
+   - Three-panel diagnostic plots
+   - Distinct categories analysis with NDC
+   - Color-coded assessment zones
+
+4. **Modular Architecture**
+   - Core functions moved to `modules/lib_gage_rr.py`
+   - Improved code reusability
+   - Better separation of concerns
+   - Easier maintenance and testing
+
+5. **Enhanced Documentation**
+   - Auto-generated README in results directory
+   - Detailed interpretation guides
+   - Clear directory structure documentation
+
+**Bug Fixes:**
+- Fixed type compatibility issues in matplotlib
+- Resolved variable initialization bugs
+- Corrected colormap access methods
+- Improved error handling and fallbacks
 
 ---
 
